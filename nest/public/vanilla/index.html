@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vanilla JS</title>
+    <link rel="stylesheet" href="style.css">
+
+    <body>
+        <div class="container mx-auto">
+            <h1 class="text-3xl font-bold text-center mt-10">Vanilla JS</h1>
+            <div class="flex justify-center mt-5">
+                <button id="btn" class="bg-blue-500 text-white px-4 py-2 rounded">Click Me!</button>
+            </div>
+            <div id="output" class="mt-5 text-center"></div>
+        </div>
+
+        <script src="script.js"></script>
+        <script>
+            // Vanilla JS code
+            document.getElementById('btn').addEventListener('click', function() {
+                document.getElementById('output').innerText = 'Button Clicked!';
+            });
+        </script>
+    </body>
+</html>

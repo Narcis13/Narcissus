@@ -9,12 +9,12 @@ export class ProductController {
   constructor(private readonly productService: ProductService) {}
 
   @Post()
+  @UseGuards(AuthGuard('jwt'))
   create(@Body() createProductDto: Prisma.ProductCreateInput) {
     return this.productService.create(createProductDto);
   }
 
   @Get()
-  @UseGuards(AuthGuard('jwt'))
   findAll() {
     return this.productService.findAll();
   }
