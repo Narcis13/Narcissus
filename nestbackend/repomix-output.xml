@@ -1,0 +1,579 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+<additional_info>
+
+</additional_info>
+
+</file_summary>
+
+<directory_structure>
+dto/
+  create-category.dto.ts
+  create-list.dto.ts
+  filter-category.dto.ts
+  filter-list.dto.ts
+  update-category.dto.ts
+  update-list.dto.ts
+categories.controller.ts
+categories.module.ts
+categories.service.ts
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="dto/create-category.dto.ts">
+import { IsString, IsNotEmpty, IsOptional, MaxLength, IsIn } from 'class-validator';
+
+export class CreateCategoryDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(255) // Example max length
+  name: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['active', 'inactive']) // Example valid statuses
+  @MaxLength(24)
+  status?: string; // Defaults to 'active' via Prisma schema
+}
+</file>
+
+<file path="dto/create-list.dto.ts">
+import { IsString, IsNotEmpty, IsOptional, MaxLength, IsIn } from 'class-validator';
+
+
+export class CreateListDto {
+    @IsString()
+    @IsNotEmpty()
+    @MaxLength(500)
+    item: string;
+  
+    // categoryId is implicitly known from the route parameter in the controller
+    // @IsInt()
+    // @IsPositive()
+    // @IsNotEmpty()
+    // categoryId: number; // We'll get this from the route param
+  
+    @IsOptional()
+    @IsString()
+    @IsIn(['active', 'inactive', 'completed'])
+    @MaxLength(24)
+    status?: string;
+  }
+</file>
+
+<file path="dto/filter-category.dto.ts">
+import { IsOptional, IsString, IsIn, IsInt, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+
+export class FilterCategoryDto {
+  @IsOptional()
+  @IsString()
+  name?: string; // Filter by name (contains)
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['active', 'inactive'])
+  status?: string; // Filter by exact status
+
+  // Pagination parameters
+  @IsOptional()
+  @Type(() => Number) // Transform query param string to number
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number) // Transform query param string to number
+  @IsInt()
+  @Min(0) // Allow 0 to fetch all (handled in service)
+  limit?: number = 10;
+
+  // Sorting parameters
+  @IsOptional()
+  @IsString()
+  // Allow sorting by 'id', 'name', 'status', 'createdAt', 'updatedAt'
+  @IsIn(['id', 'name', 'status', 'createdAt', 'updatedAt'])
+  sortBy?: string = 'createdAt'; // Default sort field
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['asc', 'desc'])
+  @Transform(({ value }) => value?.toLowerCase())
+  sortOrder?: 'asc' | 'desc' = 'desc'; // Default sort order
+}
+</file>
+
+<file path="dto/filter-list.dto.ts">
+import { IsString, IsOptional, IsIn, IsInt, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+
+
+export class FilterListDto {
+    @IsOptional()
+    @IsString()
+    item?: string;
+  
+    @IsOptional()
+    @IsString()
+    @IsIn(['active', 'inactive', 'completed'])
+    status?: string;
+  
+    // categoryId is implicitly known from the route parameter for listing within a category
+    // We might add it back if we need a global list search endpoint later
+    // @IsOptional()
+    // @Type(() => Number)
+    // @IsInt()
+    // @IsPositive()
+    // categoryId?: number;
+  
+    @IsOptional()
+    @Type(() => Number)
+    @IsInt()
+    @Min(1)
+    page?: number = 1;
+  
+    @IsOptional()
+    @Type(() => Number)
+    @IsInt()
+    @Min(0)
+    limit?: number = 10;
+  
+    @IsOptional()
+    @IsString()
+    @IsIn(['id', 'item', 'status', 'createdAt', 'updatedAt']) // category.name sorting isn't directly filterable here
+    sortBy?: string = 'createdAt';
+  
+    @IsOptional()
+    @IsString()
+    @IsIn(['asc', 'desc'])
+    @Transform(({ value }) => value?.toLowerCase())
+    sortOrder?: 'asc' | 'desc' = 'desc';
+  }
+</file>
+
+<file path="dto/update-category.dto.ts">
+import { PartialType } from '@nestjs/mapped-types';
+import { CreateCategoryDto } from './create-category.dto';
+
+export class UpdateCategoryDto extends PartialType(CreateCategoryDto) {}
+</file>
+
+<file path="dto/update-list.dto.ts">
+import {  IsOptional,  IsInt,  IsPositive } from 'class-validator';
+
+import { PartialType } from '@nestjs/mapped-types';
+import { CreateListDto } from './create-list.dto';
+
+export class UpdateListDto extends PartialType(CreateListDto) {
+    @IsOptional() // Make categoryId optional for updates
+    @IsInt()
+    @IsPositive()
+    categoryId?: number; // Allow changing the category
+}
+</file>
+
+<file path="categories.controller.ts">
+import {
+    Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards, ParseIntPipe, HttpCode, HttpStatus, DefaultValuePipe, ParseBoolPipe
+  } from '@nestjs/common';
+  import { CategoriesService } from './categories.service';
+  // DTOs are now siblings
+  import { CreateCategoryDto } from './dto/create-category.dto'; 
+  import {  UpdateCategoryDto } from './dto/update-category.dto'; 
+  import {  FilterCategoryDto } from './dto/filter-category.dto'; // Adjust DTO imports
+  import { CreateListDto } from './dto/create-list.dto';   
+  import { UpdateListDto } from './dto/update-list.dto';   
+  import { FilterListDto } from './dto/filter-list.dto'; 
+  import { AuthGuard } from '@nestjs/passport'; // Assuming JWT strategy
+  
+// Apply guard globally for this controller
+  @Controller('categories')
+  export class CategoriesController {
+    constructor(private readonly categoriesService: CategoriesService) {}
+  
+    // --- Category Routes ---
+  
+    @Post()
+    @UseGuards(AuthGuard('jwt')) 
+    @HttpCode(HttpStatus.CREATED)
+    createCategory(@Body() createCategoryDto: CreateCategoryDto) {
+      return this.categoriesService.createCategory(createCategoryDto);
+    }
+  
+    @Get()
+    @HttpCode(HttpStatus.OK)
+    findAllCategories(@Query() filterCategoryDto: FilterCategoryDto) {
+      // Public access or keep controller guard? Assuming protected for now.
+      return this.categoriesService.findAllCategories(filterCategoryDto);
+    }
+  
+    @Get(':categoryId')
+    @HttpCode(HttpStatus.OK)
+    findOneCategory(
+        @Param('categoryId', ParseIntPipe) categoryId: number,
+        // Optional query param to include lists
+        @Query('includeLists', new DefaultValuePipe(false), ParseBoolPipe) includeLists: boolean
+    ) {
+       // Public access or keep controller guard? Assuming protected for now.
+      return this.categoriesService.findOneCategory(categoryId, includeLists);
+    }
+  
+    @Patch(':categoryId')
+    @UseGuards(AuthGuard('jwt')) 
+    @HttpCode(HttpStatus.OK)
+    updateCategory(
+      @Param('categoryId', ParseIntPipe) categoryId: number,
+      @Body() updateCategoryDto: UpdateCategoryDto,
+    ) {
+      return this.categoriesService.updateCategory(categoryId, updateCategoryDto);
+    }
+  
+    @Delete(':categoryId')
+    @UseGuards(AuthGuard('jwt')) 
+    @HttpCode(HttpStatus.NO_CONTENT)
+    async removeCategory(@Param('categoryId', ParseIntPipe) categoryId: number): Promise<void> {
+      await this.categoriesService.removeCategory(categoryId);
+    }
+  
+    // --- List Item Routes (Nested under Category) ---
+  
+    @Post(':categoryId/lists')
+    @UseGuards(AuthGuard('jwt')) 
+    @HttpCode(HttpStatus.CREATED)
+    createList(
+        @Param('categoryId', ParseIntPipe) categoryId: number,
+        @Body() createListDto: CreateListDto
+    ) {
+        // categoryId from the route is passed to the service
+        return this.categoriesService.createList(categoryId, createListDto);
+    }
+  
+    @Get(':categoryId/lists')
+    @HttpCode(HttpStatus.OK)
+    findAllListsForCategory(
+        @Param('categoryId', ParseIntPipe) categoryId: number,
+        @Query() filterListDto: FilterListDto
+    ) {
+        // Public access or keep controller guard? Assuming protected for now.
+        return this.categoriesService.findAllListsForCategory(categoryId, filterListDto);
+    }
+  
+    // --- List Item Routes (Direct access via list ID) ---
+    // Note: These are still under the '/categories' base path because the controller is mounted there.
+  
+    @Get('lists/:listId') // Route: GET /categories/lists/:listId
+    @HttpCode(HttpStatus.OK)
+    findOneList(@Param('listId', ParseIntPipe) listId: number) {
+      // Public access or keep controller guard? Assuming protected for now.
+      return this.categoriesService.findOneList(listId);
+    }
+  
+    @Patch('lists/:listId')
+    @UseGuards(AuthGuard('jwt'))  // Route: PATCH /categories/lists/:listId
+    @HttpCode(HttpStatus.OK)
+    updateList(
+        @Param('listId', ParseIntPipe) listId: number,
+        @Body() updateListDto: UpdateListDto
+    ) {
+        return this.categoriesService.updateList(listId, updateListDto);
+    }
+  
+    @Delete('lists/:listId') // Route: DELETE /categories/lists/:listId
+    @UseGuards(AuthGuard('jwt')) 
+    @HttpCode(HttpStatus.NO_CONTENT)
+    async removeList(@Param('listId', ParseIntPipe) listId: number): Promise<void> {
+        await this.categoriesService.removeList(listId);
+    }
+  }
+</file>
+
+<file path="categories.module.ts">
+import { Module } from '@nestjs/common';
+import { CategoriesService } from './categories.service';
+import { CategoriesController } from './categories.controller';
+import { FilteringService } from '../../shared/services/filtering.service'; // Adjust path
+// Import DatabaseModule if needed locally, or ensure it's global
+// import { DatabaseModule } from '../../database/database.module';
+
+@Module({
+  // imports: [DatabaseModule], // Import if DatabaseService is provided by a module
+  controllers: [CategoriesController], // Single controller
+  providers: [CategoriesService, FilteringService], // Single service + shared filtering
+  exports: [CategoriesService], // Export if other modules need it (less likely now)
+})
+export class CategoriesModule {}
+</file>
+
+<file path="categories.service.ts">
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { DatabaseService } from '../../database/database.service'; // Adjust path
+import { Prisma, Category, List } from '@prisma/client';
+import { FilteringService, FilterConfig } from '../../shared/services/filtering.service'; // Adjust path
+import { CreateCategoryDto } from './dto/create-category.dto'; 
+import {  UpdateCategoryDto } from './dto/update-category.dto'; 
+import {  FilterCategoryDto } from './dto/filter-category.dto'; // Adjust DTO imports
+import { CreateListDto } from './dto/create-list.dto';   
+import { UpdateListDto } from './dto/update-list.dto';   
+import { FilterListDto } from './dto/filter-list.dto';         // Adjust DTO imports
+
+@Injectable()
+export class CategoriesService {
+  constructor(
+    private readonly prisma: DatabaseService,
+    private readonly filteringService: FilteringService,
+  ) {}
+
+  // --- Filter Configurations ---
+  private readonly categoryFilterConfig: FilterConfig = {
+    name: { field: 'name', operator: 'contains', type: 'string' },
+    status: { field: 'status', operator: 'equals', type: 'string' },
+  };
+
+  private readonly listFilterConfig: FilterConfig = {
+    item: { field: 'item', operator: 'contains', type: 'string' },
+    status: { field: 'status', operator: 'equals', type: 'string' },
+    // categoryId filtering is handled implicitly by the route or explicitly if needed
+  };
+
+  // --- Helper Methods ---
+  private async findCategoryOrFail(id: number): Promise<Category> {
+      const category = await this.prisma.category.findUnique({ where: { id } });
+      if (!category) {
+          throw new NotFoundException(`Category with ID ${id} not found`);
+      }
+      return category;
+  }
+
+   private async findListOrFail(id: number): Promise<List & { category: Category }> {
+      const list = await this.prisma.list.findUnique({
+          where: { id },
+          include: { category: true }, // Always include category for context
+      });
+      if (!list) {
+          throw new NotFoundException(`List item with ID ${id} not found`);
+      }
+      return list;
+  }
+
+  // --- Category Operations ---
+
+  async createCategory(createCategoryDto: CreateCategoryDto): Promise<Category> {
+    try {
+      return await this.prisma.category.create({
+        data: createCategoryDto,
+      });
+    } catch (error) {
+      // Handle potential errors (e.g., unique name constraint)
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+          throw new BadRequestException(`Category with name '${createCategoryDto.name}' already exists.`);
+      }
+      throw error;
+    }
+  }
+
+  async findAllCategories(filters: FilterCategoryDto) {
+    const where = this.filteringService.createWhereCondition<'Category'>(
+      filters,
+      this.categoryFilterConfig,
+    );
+    const pagination = this.filteringService.createPaginationParams(filters);
+    const orderBy = this.filteringService.createSortingParams<'Category'>(
+      filters,
+      this.categoryFilterConfig,
+    );
+
+    const [data, total] = await this.prisma.$transaction([
+      this.prisma.category.findMany({
+        where,
+        include: { _count: { select: { lists: true } } }, // Include list count
+        orderBy,
+        ...pagination,
+      }),
+      this.prisma.category.count({ where }),
+    ]);
+
+    const totalPages = pagination.take ? Math.ceil(total / pagination.take) : 1;
+    return {
+      data,
+      meta: { totalItems: total, itemsPerPage: pagination.take ?? total, totalPages, currentPage: filters.page ?? 1 },
+    };
+  }
+
+  async findOneCategory(id: number, includeLists: boolean = false): Promise<Category | null> {
+    const category = await this.prisma.category.findUnique({
+      where: { id },
+      include: {
+        lists: includeLists ? { orderBy: { createdAt: 'desc' } } : false, // Conditionally include lists
+      },
+    });
+    if (!category) {
+      throw new NotFoundException(`Category with ID ${id} not found`);
+    }
+    return category;
+  }
+
+  async updateCategory(id: number, updateCategoryDto: UpdateCategoryDto): Promise<Category> {
+    await this.findCategoryOrFail(id); // Ensure exists
+    try {
+      return await this.prisma.category.update({
+        where: { id },
+        data: updateCategoryDto,
+      });
+    } catch (error) {
+       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+          throw new BadRequestException(`Category with name '${updateCategoryDto.name}' already exists.`);
+      }
+      throw error;
+    }
+  }
+
+  async removeCategory(id: number): Promise<Category> {
+    await this.findCategoryOrFail(id); // Ensure exists
+    // Prisma's default behavior for relation constraint might prevent deletion if lists exist.
+    // Add cascade delete in schema or handle manually if needed.
+    try {
+      return await this.prisma.category.delete({ where: { id } });
+    } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003') {
+           // Foreign key constraint failed - category likely has lists associated
+           throw new BadRequestException(`Cannot delete category ID ${id} as it has associated list items.`);
+        }
+        throw error;
+    }
+  }
+
+  // --- List Item Operations ---
+
+  async createList(categoryId: number, createListDto: CreateListDto): Promise<List> {
+    await this.findCategoryOrFail(categoryId); // Ensure parent category exists
+
+    try {
+      return await this.prisma.list.create({
+        data: {
+          ...createListDto,
+          categoryId: categoryId, // Assign categoryId from parameter
+        },
+        include: { category: true },
+      });
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async findAllListsForCategory(categoryId: number, filters: FilterListDto) {
+     await this.findCategoryOrFail(categoryId); // Ensure parent category exists
+
+     // Base condition: Filter by the specific categoryId
+     const baseWhere: Prisma.ListWhereInput = { categoryId: categoryId };
+
+     // Add additional filters from the DTO
+     const additionalWhere = this.filteringService.createWhereCondition<'List'>(
+         filters,
+         this.listFilterConfig
+     );
+
+     const where = { ...baseWhere, ...additionalWhere }; // Combine conditions
+
+     const pagination = this.filteringService.createPaginationParams(filters);
+     // Note: Sorting by 'category.name' is not applicable here as all lists belong to the same category
+     const orderBy = this.filteringService.createSortingParams<'List'>(
+         filters,
+         this.listFilterConfig
+     );
+
+
+    const [data, total] = await this.prisma.$transaction([
+      this.prisma.list.findMany({
+        where,
+        include: {
+          category: { select: { id: true, name: true } } // Include basic category info
+        },
+        orderBy,
+        ...pagination,
+      }),
+      this.prisma.list.count({ where }),
+    ]);
+
+    const totalPages = pagination.take ? Math.ceil(total / pagination.take) : 1;
+    return {
+      data,
+      meta: { totalItems: total, itemsPerPage: pagination.take ?? total, totalPages, currentPage: filters.page ?? 1 },
+    };
+  }
+
+  async findOneList(listId: number): Promise<List | null> {
+      // findListOrFail already includes the category
+      return this.findListOrFail(listId);
+  }
+
+  async updateList(listId: number, updateListDto: UpdateListDto): Promise<List> {
+    await this.findListOrFail(listId); // Ensure list item exists
+
+    // If categoryId is being updated, validate the new categoryId exists
+    if (updateListDto.categoryId !== undefined) {
+        await this.findCategoryOrFail(updateListDto.categoryId);
+    }
+
+    try {
+      return await this.prisma.list.update({
+        where: { id: listId },
+        data: updateListDto,
+        include: { category: true }, // Return updated item with category
+      });
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async removeList(listId: number): Promise<List> {
+    await this.findListOrFail(listId); // Ensure list item exists
+    try {
+      return await this.prisma.list.delete({
+        where: { id: listId },
+      });
+    } catch (error) {
+      throw error;
+    }
+  }
+}
+</file>
+
+</files>

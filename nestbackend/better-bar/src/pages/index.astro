@@ -1,0 +1,68 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Hero from "../components/Hero.astro";
+import WhyUs from "../components/WhyUs.astro";
+import Counts from "../components/Counts.astro";
+import Services from "../components/Services.astro";
+import Departments from "../components/Departments.astro";
+import Doctors from "../components/Doctors.astro";
+---
+
+<Layout title="Spitalul Militar de Urgenta Pitesti">
+   <Hero />
+   <WhyUs />
+   <Counts />
+   <Services />
+   <Departments />
+   <Doctors />
+</Layout>
+<style>
+section {
+  padding: 60px 0;
+  overflow: hidden;
+}
+
+.section-bg {
+  background-color: #f1f7fd;
+}
+
+.section-title {
+  text-align: center;
+  padding-bottom: 30px;
+}
+
+.section-title h2 {
+  font-size: 32px;
+  font-weight: bold;
+  margin-bottom: 20px;
+  padding-bottom: 20px;
+  position: relative;
+  color: #2c4964;
+}
+
+.section-title h2::before {
+  content: "";
+  position: absolute;
+  display: block;
+  width: 120px;
+  height: 1px;
+  background: #ddd;
+  bottom: 1px;
+  left: calc(50% - 60px);
+}
+
+.section-title h2::after {
+  content: "";
+  position: absolute;
+  display: block;
+  width: 40px;
+  height: 3px;
+  background: #1977cc;
+  bottom: 0;
+  left: calc(50% - 20px);
+}
+
+.section-title p {
+  margin-bottom: 0;
+}
+</style>

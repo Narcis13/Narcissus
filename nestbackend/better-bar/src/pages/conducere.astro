@@ -1,0 +1,32 @@
+---
+import Layout from '../layouts/Layout.astro';
+import DataFetcher from '../components/DataFetcher.vue';
+
+// You can set these props with values you need
+const apiUrl = "http://localhost:3334/structure-attributes?attributeName=conducere";
+const pageTitle = "Conducere | Better Bar";
+---
+
+<Layout title={pageTitle}>
+  <main class="page-content">
+    <div id="data-container">
+      <DataFetcher 
+        client:load
+        url={apiUrl}
+        title="Echipa de Conducere"
+      />
+    </div>
+  </main>
+</Layout>
+
+<style>
+  .page-content {
+    padding-top: 6rem; /* Add extra padding to accommodate the fixed header */
+  }
+  
+  @media (max-width: 768px) {
+    .page-content {
+      padding-top: 5rem; /* Adjust for smaller screens if needed */
+    }
+  }
+</style>

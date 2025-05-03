@@ -1,0 +1,154 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Product {
+  id Int @default(autoincrement()) @id
+  name String @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  price Float
+  sale Boolean @default(false)
+  availibility Availibility
+
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  password  String
+  username  String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum Availibility {
+  IN_STORE
+  ONLINE
+}
+
+model Structure {
+  id     Int @id @default(autoincrement())
+  name String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  status   String?  @default("active")  @db.VarChar(24)
+  attributes StructureAttributes[] 
+}
+
+model StructureAttributes {
+  id             Int       @id @default(autoincrement())
+  structure      Structure @relation(fields: [structureId], references: [id])
+  structureId    Int
+  datatype       Datatypes
+  attributeName  String
+  attributeValue String
+  status   String?  @default("active")  @db.VarChar(24)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+enum Datatypes {
+  TEXT
+  FLOAT
+  DATE 
+  TIME
+  BOOLEAN
+}
+
+
+// Enum for the different types of content items
+enum ContentItemType {
+  PARAGRAPH
+  FILE
+  IMAGE
+}
+
+// Model for the Article (Blog Post)
+model Article {
+  id        Int      @id @default(autoincrement())
+  title     String
+  category  String
+  content   ContentItem[] // Relation to multiple ContentItem records
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Model for a single Content Item within an Article's content array
+model ContentItem {
+  id        Int             @id @default(autoincrement())
+  type      ContentItemType // The type of content (Paragraph, File, Image)
+  order     Int             // The position of this item within the article's content list
+
+  // --- Type-specific fields (optional based on 'type') ---
+
+  // For type: PARAGRAPH
+  html      String?         // Nullable, only used when type is PARAGRAPH
+
+  // For type: FILE
+  url       String?         // Nullable, only used when type is FILE
+  name      String?         // Nullable, only used when type is FILE
+
+  // For type: IMAGE
+  src       String?         // Nullable, only used when type is IMAGE
+  alt       String?         // Nullable, only used when type is IMAGE
+
+  // --- Relation back to the Article ---
+  articleId Int
+  article   Article         @relation(fields: [articleId], references: [id], onDelete: Cascade) // If Article is deleted, delete its ContentItems too
+
+
+
+}
+
+model Category {
+  id        Int      @id @default(autoincrement())
+  name     String
+  status   String?  @default("active")  @db.VarChar(24)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  lists List[]
+}
+
+model List {
+   id        Int      @id @default(autoincrement())
+   category      Category @relation(fields: [categoryId], references: [id])
+   categoryId    Int
+   item   String
+  status   String?  @default("active")  @db.VarChar(24)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Person {
+  id     Int @id @default(autoincrement())
+  name String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  status   String?  @default("active")  @db.VarChar(24)
+  attributes PersonAttributes[] 
+}
+
+model PersonAttributes {
+  id             Int       @id @default(autoincrement())
+  person      Person @relation(fields: [personId], references: [id])
+  personId    Int
+  datatype       Datatypes
+  attributeName  String
+  attributeValue String
+  status   String?  @default("active")  @db.VarChar(24)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}

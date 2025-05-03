@@ -1,0 +1,2 @@
+- implementare filtrare rezultate (refolosibil)
+- insula client-load in astro pentru conducere spital

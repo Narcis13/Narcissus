@@ -1,0 +1,292 @@
+---
+// Mock data for doctors
+const doctors = [
+  {
+    id: 1,
+    name: "Dr. Alexandra Popescu",
+    specialty: "Cardiologie",
+    description: "Specialist cu peste 15 ani de experiență în cardiologie intervențională și diagnosticul bolilor cardiovasculare.",
+    image: "https://placehold.co/300x300?text=Dr.+Popescu"
+  },
+  {
+    id: 2,
+    name: "Dr. Mihai Ionescu",
+    specialty: "Chirurgie Generală",
+    description: "Expert în chirurgie laparoscopică și intervențională, cu specializare în Germania și Franța.",
+    image: "https://placehold.co/300x300?text=Dr.+Ionescu"
+  },
+  {
+    id: 3,
+    name: "Dr. Elena Dumitrescu",
+    specialty: "Neurologie",
+    description: "Specializată în tratamentul bolilor neurodegenerative și cercetare clinică avansată.",
+    image: "https://placehold.co/300x300?text=Dr.+Dumitrescu"
+  },
+  {
+    id: 4,
+    name: "Dr. Andrei Constantinescu",
+    specialty: "Ortopedie",
+    description: "Expert în chirurgie ortopedică și traumatologie, cu focus pe medicina sportivă.",
+    image: "https://placehold.co/300x300?text=Dr.+Constantinescu"
+  },
+  {
+    id: 5,
+    name: "Dr. Maria Stanescu",
+    specialty: "Pediatrie",
+    description: "Dedicată îngrijirii copiilor, cu expertiză în boli respiratorii pediatrice și alergologie.",
+    image: "https://placehold.co/300x300?text=Dr.+Stanescu"
+  }
+];
+---
+
+<section id="doctors" class="doctors">
+  <div class="container">
+    <div class="section-title">
+      <h2>Medicii Noștri</h2>
+      <p>Echipa noastră de medici specialiști este dedicată furnizării de servicii medicale de cea mai înaltă calitate.</p>
+    </div>
+
+    <div class="doctors-slider">
+      <div class="doctors-wrapper">
+        {
+          doctors.map((doctor) => (
+            <div class="doctor-card">
+              <div class="doctor-img">
+                <img src={doctor.image} alt={`Poza ${doctor.name}`} />
+              </div>
+              <div class="doctor-info">
+                <h4>{doctor.name}</h4>
+                <span>{doctor.specialty}</span>
+                <p>{doctor.description}</p>
+              </div>
+            </div>
+          ))
+        }
+      </div>
+      
+      <div class="slider-controls">
+        <button id="prevBtn" class="slider-btn" aria-label="Previous doctors">
+          <i class="bi bi-chevron-left"></i>
+        </button>
+        <button id="nextBtn" class="slider-btn" aria-label="Next doctors">
+          <i class="bi bi-chevron-right"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const wrapper = document.querySelector('.doctors-wrapper');
+  const cards = document.querySelectorAll('.doctor-card');
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  
+  let currentIndex = 0;
+  const totalCards = cards.length;
+  
+  // Determine cards to show based on screen width
+  function getCardsToShow() {
+    if (window.innerWidth <= 768) {
+      return 1;
+    } else if (window.innerWidth <= 991) {
+      return 2;
+    } else {
+      return 3;
+    }
+  }
+  
+  let cardsToShow = getCardsToShow();
+
+  function updateSlider() {
+    const cardWidth = 100 / cardsToShow;
+    const offset = -currentIndex * cardWidth;
+    wrapper.style.transform = `translateX(${offset}%)`;
+    
+    // Update buttons state
+    prevBtn.disabled = currentIndex === 0;
+    nextBtn.disabled = currentIndex >= totalCards - cardsToShow;
+  }
+
+  prevBtn.addEventListener('click', () => {
+    if (currentIndex > 0) {
+      currentIndex--;
+      updateSlider();
+    }
+  });
+
+  nextBtn.addEventListener('click', () => {
+    if (currentIndex < totalCards - cardsToShow) {
+      currentIndex++;
+      updateSlider();
+    }
+  });
+  
+  // Handle window resize
+  window.addEventListener('resize', () => {
+    const newCardsToShow = getCardsToShow();
+    if (newCardsToShow !== cardsToShow) {
+      cardsToShow = newCardsToShow;
+      // Reset position if needed
+      if (currentIndex > totalCards - cardsToShow) {
+        currentIndex = totalCards - cardsToShow;
+      }
+      updateSlider();
+    }
+  });
+
+  // Initial setup
+  updateSlider();
+});
+</script>
+
+<style>
+.doctors {
+  padding: 60px 0;
+  overflow: hidden;
+  background-color: #f8f9fa;
+}
+
+.doctors .section-title {
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+.doctors-slider {
+  position: relative;
+  overflow: hidden;
+  padding: 20px 40px; /* Increased padding to accommodate buttons */
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.doctors-wrapper {
+  display: flex;
+  transition: transform 0.5s ease;
+  gap: 20px;
+  width: 100%;
+}
+
+.doctor-card {
+  flex: 0 0 calc(33.333% - 14px);
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 2px 15px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+  transition: all 0.3s ease;
+  max-width: 320px;
+}
+
+.doctor-card:hover {
+  transform: translateY(-5px);
+}
+
+.doctor-img {
+  position: relative;
+  overflow: hidden;
+  height: 200px;
+}
+
+.doctor-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: all 0.3s ease;
+}
+
+.doctor-info {
+  padding: 15px;
+  text-align: center;
+}
+
+.doctor-info h4 {
+  font-weight: 700;
+  margin-bottom: 5px;
+  font-size: 16px;
+  color: #2c4964;
+}
+
+.doctor-info span {
+  display: block;
+  font-size: 12px;
+  color: #1977cc;
+  margin-bottom: 8px;
+}
+
+.doctor-info p {
+  font-style: italic;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #6b7280;
+}
+
+.slider-controls {
+  position: absolute;
+  top: 50%;
+  width: 100%;
+  left: 0;
+  right: 0;
+  transform: translateY(-50%);
+  display: flex;
+  justify-content: space-between;
+  padding: 0 10px;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.slider-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #1977cc;
+  border: none;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  pointer-events: auto;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+.slider-btn:hover {
+  background: #166ab5;
+}
+
+.slider-btn:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
+.slider-btn i {
+  font-size: 18px;
+}
+
+@media (max-width: 991px) {
+  .doctor-card {
+    flex: 0 0 calc(50% - 10px);
+    max-width: none;
+  }
+  
+  .doctors-slider {
+    max-width: 700px;
+  }
+}
+
+@media (max-width: 768px) {
+  .doctor-card {
+    flex: 0 0 100%;
+  }
+  
+  .doctors-slider {
+    max-width: 320px;
+    padding: 20px 30px;
+  }
+  
+  .slider-controls {
+    padding: 0 5px;
+  }
+}
+</style>

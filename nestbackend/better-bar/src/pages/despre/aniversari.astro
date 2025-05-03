@@ -1,0 +1,32 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import BlogView from '../../components/BlogView.vue';
+
+// You can set these props with values you need
+const apiUrl = "http://localhost:3334/articles";
+const pageTitle = "Aniversari";
+---
+
+<Layout title={pageTitle}>
+  <main class="page-content">
+    <div id="data-container">
+      <BlogView 
+        client:load
+        apiUrl={apiUrl}
+       
+      />
+    </div>
+  </main>
+</Layout>
+
+<style>
+  .page-content {
+    padding-top: 7rem; /* Add extra padding to accommodate the fixed header */
+  }
+  
+  @media (max-width: 768px) {
+    .page-content {
+      padding-top: 5rem; /* Adjust for smaller screens if needed */
+    }
+  }
+</style>
