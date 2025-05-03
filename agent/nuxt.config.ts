@@ -2,12 +2,8 @@
 export default defineNuxtConfig({
   compatibilityDate: '2024-04-03',
   devtools: { enabled: true },
-
-  modules: [
-    '@nuxt/content',
-    '@nuxt/fonts',
-    '@nuxt/icon',
-    '@nuxt/test-utils',
-    '@nuxt/ui'
-  ]
+  devServer: {
+    port: 3013
+  },
+  modules: ["@prisma/nuxt",'@nuxt/fonts', '@nuxt/icon', '@nuxt/ui']
 })
