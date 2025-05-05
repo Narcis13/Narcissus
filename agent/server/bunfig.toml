@@ -1,0 +1,3 @@
+[dev]
+entry = "./src/index.ts"
+port = 3013
