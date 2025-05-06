@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-
+import { db } from "../db"; 
 // Create router instance for product endpoints
 const productRoutes = new Hono();
 
@@ -24,7 +24,33 @@ productRoutes.get('/', async (c) => {
   });
 });
 
-// GET a specific product
+
+
+productRoutes.get('/testdb', async (c) => {
+  console.log("Handling GET /api/base-environment");
+	try {
+		const query = db.query("SELECT key, value_json FROM son_base_environment;");
+		const results = query.all() as { key: string; value_json: string }[];
+
+		const baseEnvironment = results.reduce((acc, row) => {
+			try {
+				acc[row.key] = JSON.parse(row.value_json);
+			} catch (parseError) {
+				console.error(`Failed to parse JSON for base environment key "${row.key}":`, parseError);
+				// Decide how to handle parse errors: skip the key, throw, return error response?
+				// For now, we'll throw to indicate a server configuration issue.
+				throw new Error(`Invalid JSON in database for key: ${row.key}`);
+			}
+			return acc;
+		}, {} as Record<string, any>);
+
+    return c.json(baseEnvironment, 200);
+	} catch (error: any) {
+		console.error("Error fetching base environment:", error);
+		
+	}
+});
+
 productRoutes.get('/:id', async (c) => {
   const id = c.req.param('id');
   
