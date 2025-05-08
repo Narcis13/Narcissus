@@ -55,6 +55,45 @@ Function.prototype.parseNameAndArgs = function() {
   };
 
 
+  function getState(path) {
+    if (!state || !path) return '';
+    
+    const keys = path.split('.');
+    let result = state;
+    
+    for (const key of keys) {
+      if (result === undefined || result === null || !Object.prototype.hasOwnProperty.call(result, key)) {
+        return '';
+      }
+      result = result[key];
+    }
+    
+    return result !== undefined && result !== null ? result : '';
+  }
+
+  function setState(path, value) {
+    if (!state || !path) return state;
+    
+    const keys = path.split('.');
+    let current = state;
+    
+    // Navigate through the object, creating keys as needed
+    for (let i = 0; i < keys.length - 1; i++) {
+      const key = keys[i];
+      // Create the property if it doesn't exist
+      if (!current[key] || typeof current[key] !== 'object') {
+        current[key] = {};
+      }
+      current = current[key];
+    }
+    
+    // Set the final value
+    const lastKey = keys[keys.length - 1];
+    current[lastKey] = value;
+    
+    return state;
+  }
+
  function wrap(func,...args){
      return function(){
           return func(...args)
@@ -80,7 +119,10 @@ function pi(x,y){
 const state = {
     a: 1,
     b: 2,
-    c: 3
+    c: 3,
+    d:{x:13},
+    mesaj: 'hello world',
+    postfix:'!'
 }
 function suma(a, b) {
     // Determine the key name dynamically based on the values of a and b
@@ -93,6 +135,23 @@ function suma(a, b) {
     };
 }
 
+async function greet({mesaj,postfix}={mesaj: 'hello default world'}){
+
+  console.log('Please',mesaj+postfix,state.c)
+    return {
+        pass: () => {}
+    }
+  }
+
  console.log( wrap(suma,1,2)().mult() ) // 3
  console.log(pi().pass()) // 3.14
  console.log(pi.parseNameAndArgs()) // function pi(x,y){...}
+ greet(state) // {pass: ƒ}
+ wrap(greet,{mesaj:'Salut',postfix:' coaie!'})() // {pass: ƒ}
+ console.log(getState('d.x')) // 1
+
+ setState('d.x', 100);
+ console.log(state,getState('d.x')) // 100
+
+ setState('user.profile.name', 'John');
+ console.log(state); 
