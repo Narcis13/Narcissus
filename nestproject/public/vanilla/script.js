@@ -72,7 +72,7 @@ Function.prototype.parseNameAndArgs = function() {
   }
 
   function setState(path, value) {
-    if (!state || !path) return state;
+    if (!state || !path) return value;
     
     const keys = path.split('.');
     let current = state;
@@ -91,7 +91,7 @@ Function.prototype.parseNameAndArgs = function() {
     const lastKey = keys[keys.length - 1];
     current[lastKey] = value;
     
-    return state;
+    return value;
   }
 
  function wrap(func,...args){
@@ -131,8 +131,8 @@ function suma(a, b) {
 
     return {
         //here i might post to shared state
-        [(a + b) % 2 === 0 ? 'pass' : 'mult']: () => a + b
-    };
+        [(a + b) % 2 === 0 ? 'pass' : 'mult']: () => setState('rezultatSuma',a+b)
+    }
 }
 
 async function greet({mesaj,postfix}={mesaj: 'hello default world'}){
@@ -142,7 +142,7 @@ async function greet({mesaj,postfix}={mesaj: 'hello default world'}){
         pass: () => {}
     }
   }
-
+console.log(suma(1,2))
  console.log( wrap(suma,1,2)().mult() ) // 3
  console.log(pi().pass()) // 3.14
  console.log(pi.parseNameAndArgs()) // function pi(x,y){...}
