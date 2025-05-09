@@ -100,12 +100,30 @@ Function.prototype.parseNameAndArgs = function() {
      }
  }
 
- function flow (nodes){
-     
-     return function(state){
-          return {}
-     }
- }
+
+
+/**
+ * Wraps a function to automatically inject parameters from state
+ * @param {Function} fn - The function to wrap
+ * @param {string[]} paramNames - Names of parameters to inject from state
+ * @returns {Function} Wrapped function that gets parameters from state
+ */
+function withState(fn, paramNames) {
+    return function(...args) {
+        // Get the parameter names the function expects
+        const params = paramNames.reduce((params, name) => {
+            if (name in state) {
+                params[name] = getState(name);
+            }
+            return params;
+        }, {}); 
+        
+        // Call the original function with state parameters and any additional arguments
+        return fn(params, ...args);
+    };
+}
+
+
 
 function pi(x,y){
    // console.log('this in pi',pi, typeof pi)
@@ -117,7 +135,7 @@ function pi(x,y){
 } 
 
 const state = {
-    a: 1,
+    a: 5,
     b: 2,
     c: 3,
     d:{x:13},
@@ -131,27 +149,65 @@ function suma(a, b) {
 
     return {
         //here i might post to shared state
-        [(a + b) % 2 === 0 ? 'pass' : 'mult']: () => setState('rezultatSuma',a+b)
+       // [(a + b) % 2 === 0 ? 'pass' : 'mult']: () => setState('rezultatSuma',a+b)
+       pass: () =>{return  setState('rezultatSuma',getState('a')+getState('b'))}
     }
 }
 
 async function greet({mesaj,postfix}={mesaj: 'hello default world'}){
 
-  console.log('Please',mesaj+postfix,state.c)
+  console.log('Rezultat: '+getState('rezultatSuma'))
     return {
-        pass: () => {}
+        stop: () => {}
     }
   }
-console.log(suma(1,2))
- console.log( wrap(suma,1,2)().mult() ) // 3
- console.log(pi().pass()) // 3.14
- console.log(pi.parseNameAndArgs()) // function pi(x,y){...}
- greet(state) // {pass: ƒ}
- wrap(greet,{mesaj:'Salut',postfix:' coaie!'})() // {pass: ƒ}
- console.log(getState('d.x')) // 1
+console.log(suma().pass()) // 7
+ //console.log( wrap(suma,1,2)().mult() ) // 3
+ //console.log(pi().pass()) // 3.14
+ //console.log(pi.parseNameAndArgs()) // function pi(x,y){...}
+ //greet(state) // {pass: ƒ}
+ //wrap(greet,{mesaj:'Salut',postfix:' coaie!'})() // {pass: ƒ}
+ //console.log(getState('d.x')) // 1
 
- setState('d.x', 100);
- console.log(state,getState('d.x')) // 100
+ //setState('d.x', 100);
+ //console.log(state,getState('d.x')) // 100
 
- setState('user.profile.name', 'John');
- console.log(state); 
+ //setState('user.profile.name', 'John');
+ //console.log(state); 
+
+ function combineValues({ a, b }, multiplier) {
+    return (a + b) * multiplier;
+}
+
+
+
+// Call with an additional argument
+console.log("Result with additional argument:", withState(combineValues, ['a', 'b'])(4)); // (1 + 2) * 3
+
+  function flow (nodes){
+      let steps=[]
+      let currentEdge = 'start'
+     return {
+       pass(context={timestamp: Date.now()}){
+        //  let result = null;
+        //  for (const node of nodes) {
+        //    if (typeof node === 'function') {
+        //      result = node(result);
+        //    } else if (typeof node === 'object' && node !== null) {
+        //      const { pass, mult } = node;
+        //      if (pass) {
+        //        result = pass();
+        //      } else if (mult) {
+        //        result = mult();
+        //      }
+        //    }
+        //  }
+        //  return result;
+
+        console.log('context',context,currentEdge)
+       }
+     }
+ }
+
+ const flow1 = flow([suma, pi, greet]);
+ console.log(flow1.pass()) // 3.14
