@@ -12,9 +12,9 @@ function FlowManager(nodes){
       evaluateNode(node){
         let output=null;
         let returnedValue = null;
-        if (typeof node === 'function') {
-          returnedValue = node.apply(state, [9,4]);
-          console.log('node is a function', state.getState())
+        if (typeof node === 'function'|| typeof node === 'string') {
+          returnedValue = typeof node === 'function' ? node.apply(state, []):scope[node].apply(state, []);
+          console.log('node is a ...', typeof node)
           if (Array.isArray(returnedValue)) {
             if(returnedValue.every(item => typeof item === 'string')&& returnedValue.length>0){
               output = {edges: returnedValue};
@@ -123,7 +123,7 @@ function StateManager(initialState = {}) {
       _history.push(JSON.parse(JSON.stringify(_currentState)));
       _currentIndex = _history.length - 1;
       
-      return this.getState();
+      return value;
     },
 
     getState() {
@@ -232,14 +232,13 @@ Function.prototype.parseNameAndArgs = function() {
 
 
 
-function pi(x,y){
-   console.log('info', pi.parseNameAndArgs())
-   // console.log('this in pi',pi, typeof pi)
-    
-    return {
-        //here i might post to shared state
-        pass: () => 3.14
-    }
+const scope={
+  pi(x,y){
+      
+      return {
+          pass: () => 3.14
+      }
+  } 
 } 
 
 
@@ -261,15 +260,10 @@ function suma(a, b) {
     console.log('in functia suma',this,a,b)
     return  {
       pass: () =>{
-        console.log('in functia pass din functia suma',this,a,b)
+       
         return  this.set('rezultatSuma',this.get('a')+this.get('b'))
       }
     }
-   
-   // {pass: () =>{return  state.set('rezultatSuma',state.get('a')+state.get('b'))}}
-        //here i might post to shared state
-       // [(a + b) % 2 === 0 ? 'pass' : 'mult']: () => setState('rezultatSuma',a+b)
-      // pass: () =>{return  state.set('rezultatSuma',state.get('a')+state.get('b'))}
       
  
 }
@@ -296,8 +290,9 @@ async function greet({mesaj,postfix}={mesaj: 'hello default world'}){
      }
  }
 
- const flow1 = flow([suma, {x:13}]);
+ const flow1 = flow([
+                     suma,
+                    'pi',
+                    {x:13}
+  ])
  console.log(flow1.pass()) // 3.14
-console.log({
-   'check':{ 'x': 13, 'y': 200 }
-})
