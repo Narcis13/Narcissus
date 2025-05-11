@@ -1,4 +1,176 @@
-console.log("hello world");
+
+
+function FlowManager(nodes){
+  const steps=[]
+  let currentNode = null
+  let currentIndex = 0
+
+  return {
+      getSteps(){
+        return steps
+      },
+      evaluateNode(node){
+        let output=null;
+        let returnedValue = null;
+        if (typeof node === 'function') {
+          returnedValue = node.apply(state, [9,4]);
+          console.log('node is a function', state.getState())
+          if (Array.isArray(returnedValue)) {
+            if(returnedValue.every(item => typeof item === 'string')&& returnedValue.length>0){
+              output = {edges: returnedValue};
+
+            } else {
+              output = {edges: ['pass']};
+            }
+           
+           
+          } else if (typeof returnedValue === 'object' && returnedValue !== null) {
+            output= {edges : Object.keys(returnedValue).filter(key => typeof returnedValue[key] === 'function'),results:Object.keys(returnedValue).filter(key => typeof returnedValue[key] === 'function').map(k=>{return returnedValue[k]()})}
+          } else if (typeof returnedValue === 'number') { 
+          } else if (typeof returnedValue === 'string') {
+            output={edges : [returnedValue]}
+           
+          }
+          else {
+            output={edges : ['pass']} 
+          } 
+
+
+        } else if (typeof node === 'object' && node !== null) {
+          console.log('node is an object',node)
+        }
+        steps.push({node, output})
+        this.nextStep()
+
+    },
+      
+     nextStep(){
+        if (currentIndex < nodes.length) {
+          currentNode = nodes[currentIndex];
+          currentIndex++;
+          this.evaluateNode(currentNode);
+
+        } 
+      }
+     }
+
+  }
+
+
+function StateManager(initialState = {}) {
+  // Private state
+  const _currentState = JSON.parse(JSON.stringify(initialState));
+  const _history = [JSON.parse(JSON.stringify(initialState))];
+  let _currentIndex = 0;
+
+  // Return the public API
+  return {
+    withState(fn, paramNames) {
+        return function(...args) {
+            // Get the parameter names the function expects
+            const params = paramNames.reduce((params, name) => {
+                if (name in this.getState()) {
+                    params[name] = this.get(name);
+                }
+                return params;
+            }, {}); 
+            
+            // Call the original function with state parameters and any additional arguments
+            return fn(params, ...args);
+        };
+    },
+    get(path) {
+      if (!path) return '';
+      
+      const keys = path.split('.');
+      let result = _currentState;
+      
+      for (const key of keys) {
+        if (result === undefined || result === null || !Object.prototype.hasOwnProperty.call(result, key)) {
+          return '';
+        }
+        result = result[key];
+      }
+      
+      return result !== undefined && result !== null ? result : '';
+    },
+
+    set(path, value) {
+      if (!path) return _currentState;
+
+      const newState = JSON.parse(JSON.stringify(_currentState));
+      
+      const keys = path.split('.');
+      let current = newState;
+     
+      for (let i = 0; i < keys.length - 1; i++) {
+        const key = keys[i];
+
+        if (!current[key] || typeof current[key] !== 'object') {
+          current[key] = {};
+        }
+        current = current[key];
+      }
+
+      const lastKey = keys[keys.length - 1];
+      current[lastKey] = value;
+
+      // Update state
+      Object.assign(_currentState, newState);
+
+      // Update history
+      _history.splice(_currentIndex + 1);
+      _history.push(JSON.parse(JSON.stringify(_currentState)));
+      _currentIndex = _history.length - 1;
+      
+      return this.getState();
+    },
+
+    getState() {
+      return JSON.parse(JSON.stringify(_currentState));
+    },
+
+    canUndo() {
+      return _currentIndex > 0;
+    },
+
+    canRedo() {
+      return _currentIndex < _history.length - 1;
+    },
+
+    undo() {
+      if (this.canUndo()) {
+        _currentIndex--;
+        Object.assign(_currentState, JSON.parse(JSON.stringify(_history[_currentIndex])));
+      }
+      return this.getState();
+    },
+
+    redo() {
+      if (this.canRedo()) {
+        _currentIndex++;
+        Object.assign(_currentState, JSON.parse(JSON.stringify(_history[_currentIndex])));
+      }
+      return this.getState();
+    },
+
+    goToState(index) {
+      if (index >= 0 && index < _history.length) {
+        _currentIndex = index;
+        Object.assign(_currentState, JSON.parse(JSON.stringify(_history[_currentIndex])));
+      }
+      return this.getState();
+    },
+
+    getHistory() {
+      return _history.map(state => JSON.parse(JSON.stringify(state)));
+    },
+
+    getCurrentIndex() {
+      return _currentIndex;
+    }
+  };
+}
 /**
  * Parses a function's name and arguments from its source code
  * @param {string} functionString - The source code of the function to parse
@@ -55,77 +227,13 @@ Function.prototype.parseNameAndArgs = function() {
   };
 
 
-  function getState(path) {
-    if (!state || !path) return '';
-    
-    const keys = path.split('.');
-    let result = state;
-    
-    for (const key of keys) {
-      if (result === undefined || result === null || !Object.prototype.hasOwnProperty.call(result, key)) {
-        return '';
-      }
-      result = result[key];
-    }
-    
-    return result !== undefined && result !== null ? result : '';
-  }
-
-  function setState(path, value) {
-    if (!state || !path) return value;
-    
-    const keys = path.split('.');
-    let current = state;
-    
-    // Navigate through the object, creating keys as needed
-    for (let i = 0; i < keys.length - 1; i++) {
-      const key = keys[i];
-      // Create the property if it doesn't exist
-      if (!current[key] || typeof current[key] !== 'object') {
-        current[key] = {};
-      }
-      current = current[key];
-    }
-    
-    // Set the final value
-    const lastKey = keys[keys.length - 1];
-    current[lastKey] = value;
-    
-    return value;
-  }
-
- function wrap(func,...args){
-     return function(){
-          return func(...args)
-     }
- }
 
 
-
-/**
- * Wraps a function to automatically inject parameters from state
- * @param {Function} fn - The function to wrap
- * @param {string[]} paramNames - Names of parameters to inject from state
- * @returns {Function} Wrapped function that gets parameters from state
- */
-function withState(fn, paramNames) {
-    return function(...args) {
-        // Get the parameter names the function expects
-        const params = paramNames.reduce((params, name) => {
-            if (name in state) {
-                params[name] = getState(name);
-            }
-            return params;
-        }, {}); 
-        
-        // Call the original function with state parameters and any additional arguments
-        return fn(params, ...args);
-    };
-}
 
 
 
 function pi(x,y){
+   console.log('info', pi.parseNameAndArgs())
    // console.log('this in pi',pi, typeof pi)
     
     return {
@@ -134,80 +242,62 @@ function pi(x,y){
     }
 } 
 
-const state = {
-    a: 5,
-    b: 2,
-    c: 3,
-    d:{x:13},
-    mesaj: 'hello world',
-    postfix:'!'
-}
+
+const state= StateManager({
+  name:'test flow',
+  a: 8,
+  b: 5,
+  d: {
+    x: 111,
+    y: 200
+  }
+});
+
+
 function suma(a, b) {
     // Determine the key name dynamically based on the values of a and b
     let edge='start'
      edge = (a + b) % 2 === 0 ? 'pass' : 'mult';
-
-    return {
+    console.log('in functia suma',this,a,b)
+    return  {
+      pass: () =>{
+        console.log('in functia pass din functia suma',this,a,b)
+        return  this.set('rezultatSuma',this.get('a')+this.get('b'))
+      }
+    }
+   
+   // {pass: () =>{return  state.set('rezultatSuma',state.get('a')+state.get('b'))}}
         //here i might post to shared state
        // [(a + b) % 2 === 0 ? 'pass' : 'mult']: () => setState('rezultatSuma',a+b)
-       pass: () =>{return  setState('rezultatSuma',getState('a')+getState('b'))}
-    }
+      // pass: () =>{return  state.set('rezultatSuma',state.get('a')+state.get('b'))}
+      
+ 
 }
 
 async function greet({mesaj,postfix}={mesaj: 'hello default world'}){
 
-  console.log('Rezultat: '+getState('rezultatSuma'))
+  console.log('Rezultat: '+state.get('rezultatSuma'))
     return {
         stop: () => {}
     }
   }
-console.log(suma().pass()) // 7
- //console.log( wrap(suma,1,2)().mult() ) // 3
- //console.log(pi().pass()) // 3.14
- //console.log(pi.parseNameAndArgs()) // function pi(x,y){...}
- //greet(state) // {pass: ƒ}
- //wrap(greet,{mesaj:'Salut',postfix:' coaie!'})() // {pass: ƒ}
- //console.log(getState('d.x')) // 1
-
- //setState('d.x', 100);
- //console.log(state,getState('d.x')) // 100
-
- //setState('user.profile.name', 'John');
- //console.log(state); 
-
- function combineValues({ a, b }, multiplier) {
-    return (a + b) * multiplier;
-}
-
-
-
-// Call with an additional argument
-console.log("Result with additional argument:", withState(combineValues, ['a', 'b'])(4)); // (1 + 2) * 3
 
   function flow (nodes){
-      let steps=[]
-      let currentEdge = 'start'
+
+    
+      const flowManager = FlowManager(nodes);
+   
      return {
        pass(context={timestamp: Date.now()}){
-        //  let result = null;
-        //  for (const node of nodes) {
-        //    if (typeof node === 'function') {
-        //      result = node(result);
-        //    } else if (typeof node === 'object' && node !== null) {
-        //      const { pass, mult } = node;
-        //      if (pass) {
-        //        result = pass();
-        //      } else if (mult) {
-        //        result = mult();
-        //      }
-        //    }
-        //  }
-        //  return result;
-
-        console.log('context',context,currentEdge)
+  
+        flowManager.nextStep();
+        return flowManager.getSteps()
        }
      }
  }
 
- const flow1 = flow([suma, pi, greet]);
+ const flow1 = flow([suma, {x:13}]);
  console.log(flow1.pass()) // 3.14
+console.log({
+   'check':{ 'x': 13, 'y': 200 }
+})
