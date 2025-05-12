@@ -37,7 +37,7 @@ function FlowManager(nodes){
 
 
         } else if (typeof node === 'object' && node !== null) {
-          console.log('node is an object',node)
+          console.log('node is an object',node,Object.keys(node),typeof node[Object.keys(node)[0]])
         }
         steps.push({node, output})
         this.nextStep()
@@ -293,6 +293,6 @@ async function greet({mesaj,postfix}={mesaj: 'hello default world'}){
  const flow1 = flow([
                      suma,
                     'pi',
-                    {x:13}
+                    {'fn':{'x':1,'y':2}}
   ])
  console.log(flow1.pass()) // 3.14
