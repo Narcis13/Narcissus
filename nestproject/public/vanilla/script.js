@@ -37,7 +37,16 @@ function FlowManager(nodes){
 
 
         } else if (typeof node === 'object' && node !== null) {
-          console.log('node is an object',node,Object.keys(node),typeof node[Object.keys(node)[0]])
+         // console.log('node is an object',node,Object.keys(node)[0],typeof node[Object.keys(node)[0]],Object.values(node[Object.keys(node)[0]]))
+          if (Object.keys(node).length > 0 ) {
+            if(typeof node[Object.keys(node)[0]] === 'object' && !Array.isArray(node[Object.keys(node)[0]])){
+                // call node with params
+                returnedValue = scope[Object.keys(node)[0]](node[Object.keys(node)[0]]);
+            } else {
+              // here i have a structure node (decision or loop)
+
+            }
+          }
         }
         steps.push({node, output})
         this.nextStep()
@@ -268,21 +277,21 @@ function suma(a, b) {
  
 }
 
-async function greet({mesaj,postfix}={mesaj: 'hello default world'}){
+scope['Mesaj Intimpinare']= function greet({mesaj,postfix}){
 
-  console.log('Rezultat: '+state.get('rezultatSuma'))
+  console.log('::'+mesaj+' '+postfix)
     return {
-        stop: () => {}
+        stop: () => {return true}
     }
   }
 
-  function flow (nodes){
+  function flow ({nodes}){
 
     
       const flowManager = FlowManager(nodes);
    
      return {
-       pass(context={timestamp: Date.now()}){
+       pass(){
   
         flowManager.nextStep();
         return flowManager.getSteps()
@@ -290,9 +299,9 @@ async function greet({mesaj,postfix}={mesaj: 'hello default world'}){
      }
  }
 
- const flow1 = flow([
-                     suma,
+ const flow1 = flow({nodes:[
+                     {'Mesaj Intimpinare':{'mesaj':'Salut Narcis','postfix':'!'}},
                     'pi',
-                    {'fn':{'x':1,'y':2}}
-  ])
+                    {'fn':['xzd']}
+  ]})
  console.log(flow1.pass()) // 3.14
