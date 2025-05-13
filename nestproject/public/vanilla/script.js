@@ -7,116 +7,116 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
   const state = StateManager(initialState)
   function StateManager(initialState = {}) {
   // Private state
-  const _currentState = JSON.parse(JSON.stringify(initialState));
-  const _history = [JSON.parse(JSON.stringify(initialState))];
-  let _currentIndex = 0;
+      const _currentState = JSON.parse(JSON.stringify(initialState));
+      const _history = [JSON.parse(JSON.stringify(initialState))];
+      let _currentIndex = 0;
 
-  // Return the public API
-  return {
-    withState(fn, paramNames) {
-        return function(...args) {
-            // Get the parameter names the function expects
-            const params = paramNames.reduce((params, name) => {
-                if (name in this.getState()) {
-                    params[name] = this.get(name);
-                }
-                return params;
-            }, {}); 
-            
-            // Call the original function with state parameters and any additional arguments
-            return fn(params, ...args);
-        };
-    },
-    get(path) {
-      if (!path) return '';
-      
-      const keys = path.split('.');
-      let result = _currentState;
-      
-      for (const key of keys) {
-        if (result === undefined || result === null || !Object.prototype.hasOwnProperty.call(result, key)) {
-          return '';
+      // Return the public API
+      return {
+        withState(fn, paramNames) {
+            return function(...args) {
+                // Get the parameter names the function expects
+                const params = paramNames.reduce((params, name) => {
+                    if (name in this.getState()) {
+                        params[name] = this.get(name);
+                    }
+                    return params;
+                }, {}); 
+                
+                // Call the original function with state parameters and any additional arguments
+                return fn(params, ...args);
+            };
+        },
+        get(path) {
+          if (!path) return '';
+          
+          const keys = path.split('.');
+          let result = _currentState;
+          
+          for (const key of keys) {
+            if (result === undefined || result === null || !Object.prototype.hasOwnProperty.call(result, key)) {
+              return '';
+            }
+            result = result[key];
+          }
+          
+          return result !== undefined && result !== null ? result : '';
+        },
+
+        set(path, value) {
+          if (!path) return _currentState;
+
+          const newState = JSON.parse(JSON.stringify(_currentState));
+          
+          const keys = path.split('.');
+          let current = newState;
+        
+          for (let i = 0; i < keys.length - 1; i++) {
+            const key = keys[i];
+
+            if (!current[key] || typeof current[key] !== 'object') {
+              current[key] = {};
+            }
+            current = current[key];
+          }
+
+          const lastKey = keys[keys.length - 1];
+          current[lastKey] = value;
+
+          // Update state
+          Object.assign(_currentState, newState);
+
+          // Update history
+          _history.splice(_currentIndex + 1);
+          _history.push(JSON.parse(JSON.stringify(_currentState)));
+          _currentIndex = _history.length - 1;
+          
+          return value;
+        },
+
+        getState() {
+          return JSON.parse(JSON.stringify(_currentState));
+        },
+
+        canUndo() {
+          return _currentIndex > 0;
+        },
+
+        canRedo() {
+          return _currentIndex < _history.length - 1;
+        },
+
+        undo() {
+          if (this.canUndo()) {
+            _currentIndex--;
+            Object.assign(_currentState, JSON.parse(JSON.stringify(_history[_currentIndex])));
+          }
+          return this.getState();
+        },
+
+        redo() {
+          if (this.canRedo()) {
+            _currentIndex++;
+            Object.assign(_currentState, JSON.parse(JSON.stringify(_history[_currentIndex])));
+          }
+          return this.getState();
+        },
+
+        goToState(index) {
+          if (index >= 0 && index < _history.length) {
+            _currentIndex = index;
+            Object.assign(_currentState, JSON.parse(JSON.stringify(_history[_currentIndex])));
+          }
+          return this.getState();
+        },
+
+        getHistory() {
+          return _history.map(state => JSON.parse(JSON.stringify(state)));
+        },
+
+        getCurrentIndex() {
+          return _currentIndex;
         }
-        result = result[key];
-      }
-      
-      return result !== undefined && result !== null ? result : '';
-    },
-
-    set(path, value) {
-      if (!path) return _currentState;
-
-      const newState = JSON.parse(JSON.stringify(_currentState));
-      
-      const keys = path.split('.');
-      let current = newState;
-     
-      for (let i = 0; i < keys.length - 1; i++) {
-        const key = keys[i];
-
-        if (!current[key] || typeof current[key] !== 'object') {
-          current[key] = {};
-        }
-        current = current[key];
-      }
-
-      const lastKey = keys[keys.length - 1];
-      current[lastKey] = value;
-
-      // Update state
-      Object.assign(_currentState, newState);
-
-      // Update history
-      _history.splice(_currentIndex + 1);
-      _history.push(JSON.parse(JSON.stringify(_currentState)));
-      _currentIndex = _history.length - 1;
-      
-      return value;
-    },
-
-    getState() {
-      return JSON.parse(JSON.stringify(_currentState));
-    },
-
-    canUndo() {
-      return _currentIndex > 0;
-    },
-
-    canRedo() {
-      return _currentIndex < _history.length - 1;
-    },
-
-    undo() {
-      if (this.canUndo()) {
-        _currentIndex--;
-        Object.assign(_currentState, JSON.parse(JSON.stringify(_history[_currentIndex])));
-      }
-      return this.getState();
-    },
-
-    redo() {
-      if (this.canRedo()) {
-        _currentIndex++;
-        Object.assign(_currentState, JSON.parse(JSON.stringify(_history[_currentIndex])));
-      }
-      return this.getState();
-    },
-
-    goToState(index) {
-      if (index >= 0 && index < _history.length) {
-        _currentIndex = index;
-        Object.assign(_currentState, JSON.parse(JSON.stringify(_history[_currentIndex])));
-      }
-      return this.getState();
-    },
-
-    getHistory() {
-      return _history.map(state => JSON.parse(JSON.stringify(state)));
-    },
-
-    getCurrentIndex() {
-      return _currentIndex;
-    }
   };
 }
   function evaluateNode(node){
@@ -154,7 +154,7 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
                 returnedValue = scope[Object.keys(node)[0]].apply({state,steps},[node[Object.keys(node)[0]]]);
             } else {
               // here i have a structure node (decision or loop)
-
+                 console.log('node is a structure',node,Object.keys(node),Object.values(node))
             }
           }
         }
@@ -201,7 +201,33 @@ const scope={
   } 
 } 
 
+scope['Rezultat aleator'] = function() {
+    const randomValue = Math.random();
+    let edge = randomValue > 0.5 ? 'big' : 'small';
 
+    return {
+      [edge]: () => {
+       // return this.set('rezultatAleator', randomValue);
+    }
+}
+}
+scope['Afiseaza rezultat mare'] = function() {
+     console.log('E MARE!');
+    return {
+        pass: () => {
+            
+        }         
+      }
+}
+
+scope['Afiseaza rezultat mic'] = function() {
+     console.log('E MIC!');
+    return {
+        pass: () => {
+            
+        }         
+      }
+}
 
 
 function suma(a, b) {
@@ -250,7 +276,10 @@ scope['Mesaj Intimpinare']= function greet({mesaj,postfix}){
       }
  }, nodes:[
              {'Mesaj Intimpinare':{'mesaj':'Salut Narcis','postfix':'!'}},
-             'pi',
+             'Rezulat aleator', {
+                                 'big':'Afiseaza rezultat mare',
+                                 'small':'Afiseaza rezultat mic'
+                                },
              {'fn':['xzd']}
  ]});
 
