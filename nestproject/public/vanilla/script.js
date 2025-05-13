@@ -1,72 +1,11 @@
 
 
-function FlowManager(nodes){
+function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
   const steps=[]
   let currentNode = null
   let currentIndex = 0
-
-  return {
-      getSteps(){
-        return steps
-      },
-      evaluateNode(node){
-        let output=null;
-        let returnedValue = null;
-        if (typeof node === 'function'|| typeof node === 'string') {
-          returnedValue = typeof node === 'function' ? node.apply(state, []):scope[node].apply(state, []);
-          console.log('node is a ...', typeof node)
-          if (Array.isArray(returnedValue)) {
-            if(returnedValue.every(item => typeof item === 'string')&& returnedValue.length>0){
-              output = {edges: returnedValue};
-
-            } else {
-              output = {edges: ['pass']};
-            }
-           
-           
-          } else if (typeof returnedValue === 'object' && returnedValue !== null) {
-            output= {edges : Object.keys(returnedValue).filter(key => typeof returnedValue[key] === 'function'),results:Object.keys(returnedValue).filter(key => typeof returnedValue[key] === 'function').map(k=>{return returnedValue[k]()})}
-          } else if (typeof returnedValue === 'number') { 
-          } else if (typeof returnedValue === 'string') {
-            output={edges : [returnedValue]}
-           
-          }
-          else {
-            output={edges : ['pass']} 
-          } 
-
-
-        } else if (typeof node === 'object' && node !== null) {
-         // console.log('node is an object',node,Object.keys(node)[0],typeof node[Object.keys(node)[0]],Object.values(node[Object.keys(node)[0]]))
-          if (Object.keys(node).length > 0 ) {
-            if(typeof node[Object.keys(node)[0]] === 'object' && !Array.isArray(node[Object.keys(node)[0]])){
-                // call node with params
-                returnedValue = scope[Object.keys(node)[0]](node[Object.keys(node)[0]]);
-            } else {
-              // here i have a structure node (decision or loop)
-
-            }
-          }
-        }
-        steps.push({node, output})
-        this.nextStep()
-
-    },
-      
-     nextStep(){
-        if (currentIndex < nodes.length) {
-          currentNode = nodes[currentIndex];
-          currentIndex++;
-          this.evaluateNode(currentNode);
-
-        } 
-      }
-     }
-
-  }
-
-
-function StateManager(initialState = {}) {
+  const state = StateManager(initialState)
+  function StateManager(initialState = {}) {
   // Private state
   const _currentState = JSON.parse(JSON.stringify(initialState));
   const _history = [JSON.parse(JSON.stringify(initialState))];
@@ -180,60 +119,72 @@ function StateManager(initialState = {}) {
     }
   };
 }
-/**
- * Parses a function's name and arguments from its source code
- * @param {string} functionString - The source code of the function to parse
- * @returns {string[]} Array where first element is function name and the rest are argument names
- */
-function parseFunctionNameAndArgs(functionString) {
-    // Create a regular expression to match function declaration patterns
-    // This regex handles both traditional function declarations and arrow functions
-    const functionRegex = /(?:function\s+([a-zA-Z_$][\w$]*)\s*\(([^)]*)\)|(?:const|let|var)?\s*([a-zA-Z_$][\w$]*)\s*=\s*(?:function\s*\(([^)]*)\)|(?:\(([^)]*)\)\s*=>)))/;
-    
-    // Execute the regex on the function string
-    const matches = functionString.match(functionRegex);
-    
-    if (!matches) {
-      return null; // Return null if no function declaration pattern was found
+  function evaluateNode(node){
+        let output=null;
+        let returnedValue = null;
+        if (typeof node === 'function'|| typeof node === 'string') {
+          returnedValue = typeof node === 'function' ? node.apply(state, []):scope[node].apply({state,steps}, []);
+          console.log('node is a ...', typeof node)
+          if (Array.isArray(returnedValue)) {
+            if(returnedValue.every(item => typeof item === 'string')&& returnedValue.length>0){
+              output = {edges: returnedValue};
+
+            } else {
+              output = {edges: ['pass']};
+            }
+           
+           
+          } else if (typeof returnedValue === 'object' && returnedValue !== null) {
+            output= {edges : Object.keys(returnedValue).filter(key => typeof returnedValue[key] === 'function'),results:Object.keys(returnedValue).filter(key => typeof returnedValue[key] === 'function').map(k=>{return returnedValue[k]()})}
+          } else if (typeof returnedValue === 'number') { 
+          } else if (typeof returnedValue === 'string') {
+            output={edges : [returnedValue]}
+           
+          }
+          else {
+            output={edges : ['pass']} 
+          } 
+
+
+        } else if (typeof node === 'object' && node !== null) {
+         // console.log('node is an object',node,Object.keys(node)[0],typeof node[Object.keys(node)[0]],Object.values(node[Object.keys(node)[0]]))
+          if (Object.keys(node).length > 0 ) {
+            if(typeof node[Object.keys(node)[0]] === 'object' && !Array.isArray(node[Object.keys(node)[0]])){
+                // call node with params
+                returnedValue = scope[Object.keys(node)[0]].apply({state,steps},[node[Object.keys(node)[0]]]);
+            } else {
+              // here i have a structure node (decision or loop)
+
+            }
+          }
+        }
+        steps.push({node, output})
+        nextStep()
+
     }
+   function  nextStep(){
+        if (currentIndex < nodes.length) {
+          currentNode = nodes[currentIndex];
+          currentIndex++;
+          evaluateNode(currentNode);
+
+        } 
+      }
+  return {
+      getSteps(){
+        return steps
+      },
+      run(){
+        nextStep()
+      }
     
-    // Determine which pattern matched
-    let functionName, argsString;
-    
-    if (matches[1]) {
-      // Traditional function declaration: function name(args)
-      functionName = matches[1];
-      argsString = matches[2];
-    } else if (matches[3]) {
-      // Arrow function or function expression: const name = function(args) or const name = (args) =>
-      functionName = matches[3];
-      argsString = matches[4] || matches[5]; // Either from function(args) or (args) =>
-    }
-    
-    // If no function name or args were found, return null
-    if (!functionName) {
-      return null;
-    }
-    
-    // Process the arguments string to get individual argument names
-    const args = argsString ? 
-      argsString.split(',')
-        .map(arg => arg.trim()) // Trim whitespace
-        .filter(arg => arg.length > 0) : // Remove empty strings
-      [];
-    
-    // Return the array with function name as first element followed by argument names
-    return [functionName, ...args];
+     }
+
   }
 
-  /**
- * Adds a parseNameAndArgs method to the Function prototype
- * This allows any function to parse its own name and arguments
- */
-Function.prototype.parseNameAndArgs = function() {
-    // Use toString() to get the function's source code and then parse it
-    return parseFunctionNameAndArgs(this.toString());
-  };
+
+
+
 
 
 
@@ -243,7 +194,7 @@ Function.prototype.parseNameAndArgs = function() {
 
 const scope={
   pi(x,y){
-      
+      console.log('THIS in functia pi',this)
       return {
           pass: () => 3.14
       }
@@ -251,15 +202,6 @@ const scope={
 } 
 
 
-const state= StateManager({
-  name:'test flow',
-  a: 8,
-  b: 5,
-  d: {
-    x: 111,
-    y: 200
-  }
-});
 
 
 function suma(a, b) {
@@ -279,7 +221,7 @@ function suma(a, b) {
 
 scope['Mesaj Intimpinare']= function greet({mesaj,postfix}){
 
-  console.log('::'+mesaj+' '+postfix)
+  console.log(this,'::'+mesaj+' '+postfix)
     return {
         stop: () => {return true}
     }
@@ -293,15 +235,30 @@ scope['Mesaj Intimpinare']= function greet({mesaj,postfix}){
      return {
        pass(){
   
-        flowManager.nextStep();
+        flowManager.run();
         return flowManager.getSteps()
        }
      }
  }
+ const flowManager = FlowManager({initialState:{
+      name:'test flow',
+      a: 8,
+      b: 5,
+      d: {
+        x: 111,
+        y: 200
+      }
+ }, nodes:[
+             {'Mesaj Intimpinare':{'mesaj':'Salut Narcis','postfix':'!'}},
+             'pi',
+             {'fn':['xzd']}
+ ]});
 
- const flow1 = flow({nodes:[
-                     {'Mesaj Intimpinare':{'mesaj':'Salut Narcis','postfix':'!'}},
-                    'pi',
-                    {'fn':['xzd']}
-  ]})
- console.log(flow1.pass()) // 3.14
+flowManager.run()
+console.log(flowManager.getSteps()) // 3.14
+//  const flow1 = flow({nodes:[
+//                      {'Mesaj Intimpinare':{'mesaj':'Salut Narcis','postfix':'!'}},
+//                     'pi',
+//                     {'fn':['xzd']}
+//   ]})
+ //console.log(flow1.pass()) // 3.14

@@ -1,24 +1,99 @@
-/**
- * State Manager with Time Travel
- * Includes get/set nested properties with string paths and history tracking
- */
-class StateManager {
-    constructor(initialState = {}) {
-      this._currentState = JSON.parse(JSON.stringify(initialState));
-      this._history = [JSON.parse(JSON.stringify(initialState))];
-      this._currentIndex = 0;
-    }
-  
-    /**
-     * Get a value from the state using a path string
-     * @param {string} path - Path to the value (e.g., 'a' or 'nested.key.subkey')
-     * @returns {*} - Value at the path or empty string if not found
-     */
+// copie a ceva ce merge
+
+
+function FlowManager(nodes){
+  const steps=[]
+  let currentNode = null
+  let currentIndex = 0
+
+  return {
+      getSteps(){
+        return steps
+      },
+      evaluateNode(node){
+        let output=null;
+        let returnedValue = null;
+        if (typeof node === 'function'|| typeof node === 'string') {
+          returnedValue = typeof node === 'function' ? node.apply(state, []):scope[node].apply(state, []);
+          console.log('node is a ...', typeof node)
+          if (Array.isArray(returnedValue)) {
+            if(returnedValue.every(item => typeof item === 'string')&& returnedValue.length>0){
+              output = {edges: returnedValue};
+
+            } else {
+              output = {edges: ['pass']};
+            }
+           
+           
+          } else if (typeof returnedValue === 'object' && returnedValue !== null) {
+            output= {edges : Object.keys(returnedValue).filter(key => typeof returnedValue[key] === 'function'),results:Object.keys(returnedValue).filter(key => typeof returnedValue[key] === 'function').map(k=>{return returnedValue[k]()})}
+          } else if (typeof returnedValue === 'number') { 
+          } else if (typeof returnedValue === 'string') {
+            output={edges : [returnedValue]}
+           
+          }
+          else {
+            output={edges : ['pass']} 
+          } 
+
+
+        } else if (typeof node === 'object' && node !== null) {
+         // console.log('node is an object',node,Object.keys(node)[0],typeof node[Object.keys(node)[0]],Object.values(node[Object.keys(node)[0]]))
+          if (Object.keys(node).length > 0 ) {
+            if(typeof node[Object.keys(node)[0]] === 'object' && !Array.isArray(node[Object.keys(node)[0]])){
+                // call node with params
+                returnedValue = scope[Object.keys(node)[0]](node[Object.keys(node)[0]]);
+            } else {
+              // here i have a structure node (decision or loop)
+
+            }
+          }
+        }
+        steps.push({node, output})
+        this.nextStep()
+
+    },
+      
+     nextStep(){
+        if (currentIndex < nodes.length) {
+          currentNode = nodes[currentIndex];
+          currentIndex++;
+          this.evaluateNode(currentNode);
+
+        } 
+      }
+     }
+
+  }
+
+
+function StateManager(initialState = {}) {
+  // Private state
+  const _currentState = JSON.parse(JSON.stringify(initialState));
+  const _history = [JSON.parse(JSON.stringify(initialState))];
+  let _currentIndex = 0;
+
+  // Return the public API
+  return {
+    withState(fn, paramNames) {
+        return function(...args) {
+            // Get the parameter names the function expects
+            const params = paramNames.reduce((params, name) => {
+                if (name in this.getState()) {
+                    params[name] = this.get(name);
+                }
+                return params;
+            }, {}); 
+            
+            // Call the original function with state parameters and any additional arguments
+            return fn(params, ...args);
+        };
+    },
     get(path) {
       if (!path) return '';
       
       const keys = path.split('.');
-      let result = this._currentState;
+      let result = _currentState;
       
       for (const key of keys) {
         if (result === undefined || result === null || !Object.prototype.hasOwnProperty.call(result, key)) {
@@ -28,171 +103,206 @@ class StateManager {
       }
       
       return result !== undefined && result !== null ? result : '';
-    }
-  
-    /**
-     * Set a value in the state using a path string
-     * @param {string} path - Path to set (e.g., 'a' or 'nested.key.subkey')
-     * @param {*} value - Value to set at the path
-     * @returns {object} - The updated state
-     */
+    },
+
     set(path, value) {
-      if (!path) return this._currentState;
-      
-      // Create a new state to avoid mutating history
-      const newState = JSON.parse(JSON.stringify(this._currentState));
+      if (!path) return _currentState;
+
+      const newState = JSON.parse(JSON.stringify(_currentState));
       
       const keys = path.split('.');
       let current = newState;
-      
-      // Navigate through the object, creating keys as needed
+     
       for (let i = 0; i < keys.length - 1; i++) {
         const key = keys[i];
-        // Create the property if it doesn't exist
+
         if (!current[key] || typeof current[key] !== 'object') {
           current[key] = {};
         }
         current = current[key];
       }
-      
-      // Set the final value
+
       const lastKey = keys[keys.length - 1];
       current[lastKey] = value;
+
+      // Update state
+      Object.assign(_currentState, newState);
+
+      // Update history
+      _history.splice(_currentIndex + 1);
+      _history.push(JSON.parse(JSON.stringify(_currentState)));
+      _currentIndex = _history.length - 1;
       
-      // Update the current state
-      this._currentState = newState;
-      
-      // Add to history, removing any future states if we're not at the end
-      this._history = this._history.slice(0, this._currentIndex + 1);
-      this._history.push(JSON.parse(JSON.stringify(newState)));
-      this._currentIndex = this._history.length - 1;
-      
-      return this._currentState;
-    }
-  
-    /**
-     * Get the current state
-     * @returns {object} - Current state
-     */
+      return value;
+    },
+
     getState() {
-      return JSON.parse(JSON.stringify(this._currentState));
-    }
-  
-    /**
-     * Check if we can go back in history
-     * @returns {boolean} - True if we can go back
-     */
+      return JSON.parse(JSON.stringify(_currentState));
+    },
+
     canUndo() {
-      return this._currentIndex > 0;
-    }
-  
-    /**
-     * Check if we can go forward in history
-     * @returns {boolean} - True if we can go forward
-     */
+      return _currentIndex > 0;
+    },
+
     canRedo() {
-      return this._currentIndex < this._history.length - 1;
-    }
-  
-    /**
-     * Go back in history
-     * @returns {object} - The state after going back, or current state if can't go back
-     */
+      return _currentIndex < _history.length - 1;
+    },
+
     undo() {
       if (this.canUndo()) {
-        this._currentIndex--;
-        this._currentState = JSON.parse(JSON.stringify(this._history[this._currentIndex]));
+        _currentIndex--;
+        Object.assign(_currentState, JSON.parse(JSON.stringify(_history[_currentIndex])));
       }
       return this.getState();
-    }
-  
-    /**
-     * Go forward in history
-     * @returns {object} - The state after going forward, or current state if can't go forward
-     */
+    },
+
     redo() {
       if (this.canRedo()) {
-        this._currentIndex++;
-        this._currentState = JSON.parse(JSON.stringify(this._history[this._currentIndex]));
+        _currentIndex++;
+        Object.assign(_currentState, JSON.parse(JSON.stringify(_history[_currentIndex])));
       }
       return this.getState();
-    }
-  
-    /**
-     * Go to a specific point in history
-     * @param {number} index - The history index to go to
-     * @returns {object} - The state at that index, or current state if index is invalid
-     */
+    },
+
     goToState(index) {
-      if (index >= 0 && index < this._history.length) {
-        this._currentIndex = index;
-        this._currentState = JSON.parse(JSON.stringify(this._history[this._currentIndex]));
+      if (index >= 0 && index < _history.length) {
+        _currentIndex = index;
+        Object.assign(_currentState, JSON.parse(JSON.stringify(_history[_currentIndex])));
       }
       return this.getState();
-    }
-  
-    /**
-     * Get all history states
-     * @returns {Array} - Array of all states in history
-     */
+    },
+
     getHistory() {
-      return this._history.map(state => JSON.parse(JSON.stringify(state)));
-    }
-  
-    /**
-     * Get the current history index
-     * @returns {number} - Current index in history
-     */
+      return _history.map(state => JSON.parse(JSON.stringify(state)));
+    },
+
     getCurrentIndex() {
-      return this._currentIndex;
+      return _currentIndex;
+    }
+  };
+}
+/**
+ * Parses a function's name and arguments from its source code
+ * @param {string} functionString - The source code of the function to parse
+ * @returns {string[]} Array where first element is function name and the rest are argument names
+ */
+function parseFunctionNameAndArgs(functionString) {
+    // Create a regular expression to match function declaration patterns
+    // This regex handles both traditional function declarations and arrow functions
+    const functionRegex = /(?:function\s+([a-zA-Z_$][\w$]*)\s*\(([^)]*)\)|(?:const|let|var)?\s*([a-zA-Z_$][\w$]*)\s*=\s*(?:function\s*\(([^)]*)\)|(?:\(([^)]*)\)\s*=>)))/;
+    
+    // Execute the regex on the function string
+    const matches = functionString.match(functionRegex);
+    
+    if (!matches) {
+      return null; // Return null if no function declaration pattern was found
+    }
+    
+    // Determine which pattern matched
+    let functionName, argsString;
+    
+    if (matches[1]) {
+      // Traditional function declaration: function name(args)
+      functionName = matches[1];
+      argsString = matches[2];
+    } else if (matches[3]) {
+      // Arrow function or function expression: const name = function(args) or const name = (args) =>
+      functionName = matches[3];
+      argsString = matches[4] || matches[5]; // Either from function(args) or (args) =>
+    }
+    
+    // If no function name or args were found, return null
+    if (!functionName) {
+      return null;
+    }
+    
+    // Process the arguments string to get individual argument names
+    const args = argsString ? 
+      argsString.split(',')
+        .map(arg => arg.trim()) // Trim whitespace
+        .filter(arg => arg.length > 0) : // Remove empty strings
+      [];
+    
+    // Return the array with function name as first element followed by argument names
+    return [functionName, ...args];
+  }
+
+  /**
+ * Adds a parseNameAndArgs method to the Function prototype
+ * This allows any function to parse its own name and arguments
+ */
+Function.prototype.parseNameAndArgs = function() {
+    // Use toString() to get the function's source code and then parse it
+    return parseFunctionNameAndArgs(this.toString());
+  };
+
+
+
+
+
+
+
+const scope={
+  pi(x,y){
+      
+      return {
+          pass: () => 3.14
+      }
+  } 
+} 
+
+
+const state= StateManager({
+  name:'test flow',
+  a: 8,
+  b: 5,
+  d: {
+    x: 111,
+    y: 200
+  }
+});
+
+
+function suma(a, b) {
+    // Determine the key name dynamically based on the values of a and b
+    let edge='start'
+     edge = (a + b) % 2 === 0 ? 'pass' : 'mult';
+    console.log('in functia suma',this,a,b)
+    return  {
+      pass: () =>{
+       
+        return  this.set('rezultatSuma',this.get('a')+this.get('b'))
+      }
+    }
+      
+ 
+}
+
+scope['Mesaj Intimpinare']= function greet({mesaj,postfix}){
+
+  console.log('::'+mesaj+' '+postfix)
+    return {
+        stop: () => {return true}
     }
   }
+
+  function flow ({nodes}){
+
+    
+      const flowManager = FlowManager(nodes);
+   
+     return {
+       pass(){
   
-  // Example usage:
-  const initialState = {
-    a: 1,
-    b: 2,
-    c: 3,
-    mesaj: 'hello world',
-    postfix: '!'
-  };
-  
-  // Create a state manager instance
-  const stateManager = new StateManager(initialState);
-  
-  // Example operations
-  console.log("Initial state:", stateManager.getState());
-  
-  stateManager.set('a', 42);
-  console.log("After setting a=42:", stateManager.getState());
-  
-  stateManager.set('nested.deeply.value', 'I am nested');
-  console.log("After setting nested value:", stateManager.getState());
-  console.log("Get nested value:", stateManager.get('nested.deeply.value'));
-  
-  stateManager.set('b', 100);
-  console.log("After setting b=100:", stateManager.getState());
-  
-  // Time travel - undo
-  console.log("Can undo?", stateManager.canUndo());
-  if (stateManager.canUndo()) {
-    console.log("After undo:", stateManager.undo());
-  }
-  
-  // Time travel - undo again
-  if (stateManager.canUndo()) {
-    console.log("After second undo:", stateManager.undo());
-  }
-  
-  // Time travel - redo
-  console.log("Can redo?", stateManager.canRedo());
-  if (stateManager.canRedo()) {
-    console.log("After redo:", stateManager.redo());
-  }
-  
-  // See all history
-  console.log("History:", stateManager.getHistory());
-  console.log("Current history index:", stateManager.getCurrentIndex());
-  
-  // Jump to specific state
-  console.log("Jump to first state:", stateManager.goToState(0));
+        flowManager.nextStep();
+        return flowManager.getSteps()
+       }
+     }
+ }
+
+ const flow1 = flow({nodes:[
+                     {'Mesaj Intimpinare':{'mesaj':'Salut Narcis','postfix':'!'}},
+                    'pi',
+                    {'fn':['xzd']}
+  ]})
+ console.log(flow1.pass()) // 3.14
