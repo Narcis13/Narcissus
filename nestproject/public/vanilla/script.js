@@ -266,7 +266,26 @@ function flow({nodes}){
     }
   };
 }
-
+scope['With elements'] =function({of}){
+  this.state.set('elements',of)
+  return {
+    doTHIS: () => {
+      // Function content
+    }         
+  };
+};
+scope['Print elements'] = function(){
+  const elements = this.state.get('elements');
+  console.log('elements', elements);
+ elements.forEach((element, index) => {
+    console.log('Element ' + index + ':', element);
+  });
+  return {
+    pass: () => {
+      // Function content
+    }         
+  };    
+}
 const flowManager = FlowManager({
   initialState:{
     name: 'test flow',
@@ -278,13 +297,15 @@ const flowManager = FlowManager({
     }
   }, 
   nodes:[
-    'Rezultat aleator', 
-    {
-      'big': 'Afiseaza rezultat mare',
-      'small': 'Afiseaza rezultat mic'
-    },
+   // 'Rezultat aleator', 
+ //   {
+ //     'big': 'Afiseaza rezultat mare',
+//      'small': 'Afiseaza rezultat mic'
+ //   },
 
-    {'Mesaj Intimpinare': {'mesaj': 'Salut Petru', 'postfix': '!!!'}}
+  //  {'Mesaj Intimpinare': {'mesaj': 'Salut Petru', 'postfix': '!!!'}},
+    {'With elements': {'of': ['1', '2', '3']}},
+    {'doTHIS': 'Print elements'}
   ]
 });
 
