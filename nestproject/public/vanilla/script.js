@@ -1,5 +1,3 @@
-
-
 function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
   const steps=[]
   let currentNode = null
@@ -117,177 +115,178 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
         getCurrentIndex() {
           return _currentIndex;
         }
-  };
-}
-  function evaluateNode(node){
-        let output=null;
-        let returnedValue = null;
-        if (typeof node === 'function'|| typeof node === 'string') {
-          returnedValue = typeof node === 'function' ? node.apply(state, []):scope[node].apply({state,steps}, []);
-          console.log('node is a ...', typeof node)
-          if (Array.isArray(returnedValue)) {
-            if(returnedValue.every(item => typeof item === 'string')&& returnedValue.length>0){
-              output = {edges: returnedValue};
-
-            } else {
-              output = {edges: ['pass']};
-            }
-           
-           
-          } else if (typeof returnedValue === 'object' && returnedValue !== null) {
-            output= {edges : Object.keys(returnedValue).filter(key => typeof returnedValue[key] === 'function'),results:Object.keys(returnedValue).filter(key => typeof returnedValue[key] === 'function').map(k=>{return returnedValue[k]()})}
-          } else if (typeof returnedValue === 'number') { 
-          } else if (typeof returnedValue === 'string') {
-            output={edges : [returnedValue]}
-           
-          }
-          else {
-            output={edges : ['pass']} 
-          } 
-
-
-        } else if (typeof node === 'object' && node !== null) {
-         // console.log('node is an object',node,Object.keys(node)[0],typeof node[Object.keys(node)[0]],Object.values(node[Object.keys(node)[0]]))
-          if (Object.keys(node).length > 0 ) {
-            if(typeof node[Object.keys(node)[0]] === 'object' && !Array.isArray(node[Object.keys(node)[0]])){
-                // call node with params
-                returnedValue = scope[Object.keys(node)[0]].apply({state,steps},[node[Object.keys(node)[0]]]);
-            } else {
-              // here i have a structure node (decision or loop)
-                 console.log('node is a structure',node,Object.keys(node),Object.values(node),typeof node[Object.keys(node)[0]]==='string'||typeof node[Object.keys(node)[0]]==='string'||Array.isArray(node[Object.keys(node)[0]]),steps.at(-1)? steps.at(-1).output.edges:[])
-            }
-          }
-        }
-        steps.push({node, output})
-        nextStep()
-
+      };
     }
-   function  nextStep(){
-        if (currentIndex < nodes.length) {
-          currentNode = nodes[currentIndex];
-          currentIndex++;
-          evaluateNode(currentNode);
-
-        } 
-      }
-  return {
-      getSteps(){
-        return steps
-      },
-      run(){
-        nextStep()
-      }
+  
+  function evaluateNode(node){
+    let output = null;
+    let returnedValue = null;
     
-     }
-
+    if (typeof node === 'function' || typeof node === 'string') {
+      returnedValue = typeof node === 'function' ? node.apply(state, []) : scope[node].apply({state, steps}, []);
+      console.log('node is a ...', typeof node);
+      
+      if (Array.isArray(returnedValue)) {
+        if(returnedValue.every(item => typeof item === 'string') && returnedValue.length > 0){
+          output = {edges: returnedValue};
+        } else {
+          output = {edges: ['pass']};
+        }
+      } else if (typeof returnedValue === 'object' && returnedValue !== null) {
+        output = {
+          edges: Object.keys(returnedValue).filter(key => typeof returnedValue[key] === 'function'),
+          results: Object.keys(returnedValue).filter(key => typeof returnedValue[key] === 'function').map(k => {
+            return returnedValue[k]();
+          })
+        };
+      } else if (typeof returnedValue === 'string') {
+        output = {edges: [returnedValue]};
+      } else {
+        output = {edges: ['pass']};
+      } 
+    } else if (typeof node === 'object' && node !== null) {
+      if (Object.keys(node).length > 0) {
+        if(typeof node[Object.keys(node)[0]] === 'object' && !Array.isArray(node[Object.keys(node)[0]])){
+          // call node with params
+          returnedValue = scope[Object.keys(node)[0]].apply({state, steps}, [node[Object.keys(node)[0]]]);
+          output = {edges: ['pass']}; // Set default output for object nodes
+        } else {
+          // here we have a structure node (decision or loop)
+          Object.keys(node).forEach(key => {
+            // FIX: Check if steps.at(-1) exists and has an output with edges
+            const edges = (steps.at(-1) && steps.at(-1).output && steps.at(-1).output.edges) ? steps.at(-1).output.edges : [];
+            
+            if(typeof node[key] === 'string' || typeof node[key] === 'function' || Array.isArray(node[key])){
+              if (edges.includes(key)) {
+                console.log('key', key, node[key], edges);
+                evaluateNode(node[key]);
+              }
+            }
+          });
+        }
+      }
+      // Ensure output is defined for all object nodes
+      if (!output) {
+        output = {edges: ['pass']};
+      }
+    }
+    
+    // Always ensure output has an edges property
+    if (!output) {
+      output = {edges: ['pass']};
+    }
+    
+    steps.push({node, output});
+    nextStep();
   }
 
+  function nextStep(){
+    if (currentIndex < nodes.length) {
+      currentNode = nodes[currentIndex];
+      currentIndex++;
+      evaluateNode(currentNode);
+    } 
+  }
+  
+  return {
+    getSteps(){
+      return steps;
+    },
+    run(){
+      nextStep();
+    }
+  };
+}
 
-
-
-
-
-
-
-
-
-
-const scope={
-  pi(x,y){
-      console.log('THIS in functia pi',this)
-      return {
-          pass: () => 3.14
-      }
-  } 
-} 
+const scope = {
+  pi(x, y){
+    console.log('THIS in functia pi', this);
+    return {
+      pass: () => 3.14
+    };
+  }
+};
 
 scope['Rezultat aleator'] = function() {
-    const randomValue = Math.random();
-    let edge = randomValue > 0.5 ? 'big' : 'small';
+  const randomValue = Math.random();
+  let edge = randomValue > 0.5 ? 'big' : 'small';
 
-    return {
-      [edge]: () => {
-       // return this.set('rezultatAleator', randomValue);
+  return {
+    [edge]: () => {
+      // return this.state.set('rezultatAleator', randomValue);
     }
-}
-}
+  };
+};
+
 scope['Afiseaza rezultat mare'] = function() {
-     console.log('E MARE!');
-    return {
-        pass: () => {
-            
-        }         
-      }
-}
+  console.log('E MARE!');
+  return {
+    pass: () => {
+      // Function content
+    }         
+  };
+};
 
 scope['Afiseaza rezultat mic'] = function() {
-     console.log('E MIC!');
-    return {
-        pass: () => {
-            
-        }         
-      }
-}
+  console.log('E MIC!');
+  return {
+    pass: () => {
+      // Function content
+    }         
+  };
+};
 
 
 function suma(a, b) {
-    // Determine the key name dynamically based on the values of a and b
-    let edge='start'
-     edge = (a + b) % 2 === 0 ? 'pass' : 'mult';
-    console.log('in functia suma',this,a,b)
-    return  {
-      pass: () =>{
-       
-        return  this.set('rezultatSuma',this.get('a')+this.get('b'))
-      }
+  // Determine the key name dynamically based on the values of a and b
+  let edge = 'start';
+  edge = (a + b) % 2 === 0 ? 'pass' : 'mult';
+  console.log('in functia suma', this, a, b);
+  return {
+    pass: () => {
+      return this.state.set('rezultatSuma', this.state.get('a') + this.state.get('b'));
     }
-      
- 
+  };
 }
 
-scope['Mesaj Intimpinare']= function greet({mesaj,postfix}){
+scope['Mesaj Intimpinare'] = function greet({mesaj, postfix}){
+  console.log(this, '::' + mesaj + ' ' + postfix);
+  return {
+    stop: () => {return true}
+  };
+};
 
-  console.log(this,'::'+mesaj+' '+postfix)
-    return {
-        stop: () => {return true}
-    }
-  }
-
-  function flow ({nodes}){
-
-    
-      const flowManager = FlowManager(nodes);
-   
-     return {
-       pass(){
+function flow({nodes}){
+  const flowManager = FlowManager({nodes});
   
-        flowManager.run();
-        return flowManager.getSteps()
-       }
-     }
- }
- const flowManager = FlowManager({initialState:{
-      name:'test flow',
-      a: 8,
-      b: 5,
-      d: {
-        x: 111,
-        y: 200
-      }
- }, nodes:[
-           //  {'Mesaj Intimpinare':{'mesaj':'Salut Narcis','postfix':'!'}},
-             'Rezultat aleator', {
-                                 'big':'Afiseaza rezultat mare',
-                                 'small':'Afiseaza rezultat mic'
-                                },
-           //  {'fn':['xzd']}
- ]});
+  return {
+    pass(){
+      flowManager.run();
+      return flowManager.getSteps();
+    }
+  };
+}
 
-flowManager.run()
-//console.log(flowManager.getSteps()) // 3.14
-//  const flow1 = flow({nodes:[
-//                      {'Mesaj Intimpinare':{'mesaj':'Salut Narcis','postfix':'!'}},
-//                     'pi',
-//                     {'fn':['xzd']}
-//   ]})
- //console.log(flow1.pass()) // 3.14
+const flowManager = FlowManager({
+  initialState:{
+    name: 'test flow',
+    a: 8,
+    b: 5,
+    d: {
+      x: 111,
+      y: 200
+    }
+  }, 
+  nodes:[
+    'Rezultat aleator', 
+    {
+      'big': 'Afiseaza rezultat mare',
+      'small': 'Afiseaza rezultat mic'
+    },
+
+    {'Mesaj Intimpinare': {'mesaj': 'Salut Petru', 'postfix': '!!!'}}
+  ]
+});
+
+flowManager.run();
+console.log(flowManager.getSteps()); // Should now work without errors
