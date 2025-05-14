@@ -154,7 +154,7 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
                 returnedValue = scope[Object.keys(node)[0]].apply({state,steps},[node[Object.keys(node)[0]]]);
             } else {
               // here i have a structure node (decision or loop)
-                 console.log('node is a structure',node,Object.keys(node),Object.values(node))
+                 console.log('node is a structure',node,Object.keys(node),Object.values(node),typeof node[Object.keys(node)[0]]==='string'||typeof node[Object.keys(node)[0]]==='string'||Array.isArray(node[Object.keys(node)[0]]),steps.at(-1)? steps.at(-1).output.edges:[])
             }
           }
         }
@@ -275,16 +275,16 @@ scope['Mesaj Intimpinare']= function greet({mesaj,postfix}){
         y: 200
       }
  }, nodes:[
-             {'Mesaj Intimpinare':{'mesaj':'Salut Narcis','postfix':'!'}},
-             'Rezulat aleator', {
+           //  {'Mesaj Intimpinare':{'mesaj':'Salut Narcis','postfix':'!'}},
+             'Rezultat aleator', {
                                  'big':'Afiseaza rezultat mare',
                                  'small':'Afiseaza rezultat mic'
                                 },
-             {'fn':['xzd']}
+           //  {'fn':['xzd']}
  ]});
 
 flowManager.run()
-console.log(flowManager.getSteps()) // 3.14
+//console.log(flowManager.getSteps()) // 3.14
 //  const flow1 = flow({nodes:[
 //                      {'Mesaj Intimpinare':{'mesaj':'Salut Narcis','postfix':'!'}},
 //                     'pi',
