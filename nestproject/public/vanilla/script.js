@@ -146,16 +146,16 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
     let returnedValue = null;
     
     if (typeof node === 'function' || typeof node === 'string') {
-      returnedValue = typeof node === 'function' ? node.apply(state, []) : scope[node].apply({state, steps}, []);
-      console.log('node is a ...', typeof node);
+      returnedValue = typeof node === 'function' ? node.apply(state, []) : scope[node].apply({state, steps,nodes}, []);
+      
       output = processReturnedValue(returnedValue);
 
     } else if (typeof node === 'object' && node !== null) {
       if (Object.keys(node).length > 0) {
         if(typeof node[Object.keys(node)[0]] === 'object' && !Array.isArray(node[Object.keys(node)[0]])){
           // call node with params
-          returnedValue = scope[Object.keys(node)[0]].apply({state, steps}, [node[Object.keys(node)[0]]]);
-          output = {edges: ['pass']}; // Set default output for object nodes
+          returnedValue = scope[Object.keys(node)[0]].apply({state, steps,nodes}, [node[Object.keys(node)[0]]]);
+          output = processReturnedValue(returnedValue)//{edges: ['pass']}; // Set default output for object nodes
         } else {
           // here we have a structure node (decision or loop)
           Object.keys(node).forEach(key => {
@@ -164,7 +164,7 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
             
             if(typeof node[key] === 'string' || typeof node[key] === 'function' || Array.isArray(node[key])){
               if (edges.includes(key)) {
-                console.log('key', key, node[key], edges);
+                console.log('rezultat anterior', steps.at(-1).output);// de aici poate ma leg sa fac loop!
                 evaluateNode(node[key]);
               }
             }
@@ -173,12 +173,14 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
       }
       // Ensure output is defined for all object nodes
       if (!output) {
+        console.log('output is not defined for object node', node);
         output = {edges: ['pass']};
       }
     }
     
     // Always ensure output has an edges property
     if (!output) {
+      console.log('!!!output is not defined', node);
       output = {edges: ['pass']};
     }
     
@@ -262,27 +264,19 @@ scope['Mesaj Intimpinare'] = function greet({mesaj, postfix}){
   };
 };
 
-function flow({nodes}){
-  const flowManager = FlowManager({nodes});
-  
-  return {
-    pass(){
-      flowManager.run();
-      return flowManager.getSteps();
-    }
-  };
-}
+
 scope['With elements'] =function({of}){
   this.state.set('elements',of)
   return {
-    doTHIS: () => {
-      // Function content
+    do: () => {
+      console.log('in do function',this)
+      return [true]
     }         
   };
 };
 scope['Print elements'] = function(){
   const elements = this.state.get('elements');
-  console.log('elements', elements);
+
  elements.forEach((element, index) => {
     console.log('Element ' + index + ':', element);
   });
@@ -303,17 +297,17 @@ const flowManager = FlowManager({
     }
   }, 
   nodes:[
-   // 'Rezultat aleator', 
- //   {
- //     'big': 'Afiseaza rezultat mare',
-//      'small': 'Afiseaza rezultat mic'
- //   },
+    'Rezultat aleator', 
+    {
+      'big': 'Afiseaza rezultat mare',
+      'small': 'Afiseaza rezultat mic'
+    },
 
-  //  {'Mesaj Intimpinare': {'mesaj': 'Salut Petru', 'postfix': '!!!'}},
+    {'Mesaj Intimpinare': {'mesaj': 'Salut Petru', 'postfix': '!!!'}},
     {'With elements': {'of': ['1', '2', '3']}},
-    {'doTHIS': 'Print elements'}
+                             {'do': 'Print elements'}
   ]
 });
 
 flowManager.run();
-console.log(flowManager.getSteps()); // Should now work without errors
+//console.log(flowManager.getSteps()); // Should now work without errors
