@@ -118,14 +118,8 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
       };
     }
   
-  function evaluateNode(node){
-    let output = null;
-    let returnedValue = null;
-    
-    if (typeof node === 'function' || typeof node === 'string') {
-      returnedValue = typeof node === 'function' ? node.apply(state, []) : scope[node].apply({state, steps}, []);
-      console.log('node is a ...', typeof node);
-      
+    function processReturnedValue(returnedValue){
+      let output = null;
       if (Array.isArray(returnedValue)) {
         if(returnedValue.every(item => typeof item === 'string') && returnedValue.length > 0){
           output = {edges: returnedValue};
@@ -144,6 +138,18 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
       } else {
         output = {edges: ['pass']};
       } 
+      return output;
+    }
+    
+    function evaluateNode(node){
+    let output = null;
+    let returnedValue = null;
+    
+    if (typeof node === 'function' || typeof node === 'string') {
+      returnedValue = typeof node === 'function' ? node.apply(state, []) : scope[node].apply({state, steps}, []);
+      console.log('node is a ...', typeof node);
+      output = processReturnedValue(returnedValue);
+
     } else if (typeof node === 'object' && node !== null) {
       if (Object.keys(node).length > 0) {
         if(typeof node[Object.keys(node)[0]] === 'object' && !Array.isArray(node[Object.keys(node)[0]])){
