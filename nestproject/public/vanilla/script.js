@@ -173,14 +173,14 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
       }
       // Ensure output is defined for all object nodes
       if (!output) {
-        console.log('output is not defined for object node', node);
+       // console.log('output is not defined for object node', node);
         output = {edges: ['pass']};
       }
     }
     
     // Always ensure output has an edges property
     if (!output) {
-      console.log('!!!output is not defined', node);
+    // console.log('!!!output is not defined', node);
       output = {edges: ['pass']};
     }
     
