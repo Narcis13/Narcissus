@@ -146,7 +146,7 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
     let returnedValue = null;
     
     if (typeof node === 'function' || typeof node === 'string') {
-      returnedValue = typeof node === 'function' ? node.apply(state, []) : scope[node].apply({state, steps,nodes}, []);
+      returnedValue = typeof node === 'function' ? node.apply(state, []) : scope[node].apply({state, steps,nodes,currentIndex}, []);
       
       output = processReturnedValue(returnedValue);
 
@@ -154,7 +154,7 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
       if (Object.keys(node).length > 0) {
         if(typeof node[Object.keys(node)[0]] === 'object' && !Array.isArray(node[Object.keys(node)[0]])){
           // call node with params
-          returnedValue = scope[Object.keys(node)[0]].apply({state, steps,nodes}, [node[Object.keys(node)[0]]]);
+          returnedValue = scope[Object.keys(node)[0]].apply({state, steps,nodes,currentIndex}, [node[Object.keys(node)[0]]]);
           output = processReturnedValue(returnedValue)//{edges: ['pass']}; // Set default output for object nodes
         } else {
           // here we have a structure node (decision or loop)
@@ -180,7 +180,7 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
     
     // Always ensure output has an edges property
     if (!output) {
-    // console.log('!!!output is not defined', node);
+     console.log('!!!output is not defined', node);
       output = {edges: ['pass']};
     }
     
