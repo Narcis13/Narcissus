@@ -1,11 +1,18 @@
-// copie a ceva ce merge
+// Helper function to check if a function is async
 
 
 function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
   const steps = [];
   let currentNode = null;
   let currentIndex = 0;
-  const fmState = StateManager(initialState); // Renamed to avoid conflict with context.state
+  const fmState = StateManager(initialState);
+  let _resolveRunPromise = null;
+  let _rejectRunPromise = null;
+  
+  function isAsyncFunction(fn) {
+    if (!fn) return false;
+    return fn.constructor && fn.constructor.name === 'AsyncFunction';
+  }
 
   // --- StateManager ---
   function StateManager(_initialState = {}) {
@@ -15,15 +22,30 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
 
     return {
       withState(fn, paramNames) {
-        return function(...args) {
-          const params = paramNames.reduce((acc, name) => {
-            if (name in this.getState()) {
-              acc[name] = this.get(name);
-            }
-            return acc;
-          }, {});
-          return fn.call(this, params, ...args); // Ensure 'this' context for fn if it expects one from StateManager
-        };
+        const smInstance = this; // Capture StateManager's 'this'
+        // The returned function should be async if 'fn' is async.
+        if (isAsyncFunction(fn)) {
+          return async function(...args) { // Return an async function
+            const params = (paramNames || []).reduce((acc, name) => {
+              // Check if name is a top-level key in _currentState
+              if (Object.prototype.hasOwnProperty.call(smInstance.getState(), name)) {
+                acc[name] = smInstance.get(name);
+              }
+              return acc;
+            }, {});
+            return await fn.call(smInstance, params, ...args); // Ensure 'this' context for fn is StateManager
+          };
+        } else {
+          return function(...args) {
+            const params = (paramNames || []).reduce((acc, name) => {
+              if (Object.prototype.hasOwnProperty.call(smInstance.getState(), name)) {
+                acc[name] = smInstance.get(name);
+              }
+              return acc;
+            }, {});
+            return fn.call(smInstance, params, ...args);
+          };
+        }
       },
       get(path) {
         if (!path) return '';
@@ -39,7 +61,6 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
       },
       set(path, value) {
         let targetStateObject = _currentState;
-        // MODIFICATION: Allow replacing the whole state
         if (path === null || path === '') {
           const newStateParsed = JSON.parse(JSON.stringify(value));
           for (const key in _currentState) {
@@ -53,8 +74,7 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
             }
           }
         } else {
-          // Original logic for path-based set
-          const newStateCopy = JSON.parse(JSON.stringify(_currentState)); // Work on a copy for path creation
+          const newStateCopy = JSON.parse(JSON.stringify(_currentState));
           let current = newStateCopy;
           const keys = path.split('.');
           for (let i = 0; i < keys.length - 1; i++) {
@@ -66,14 +86,14 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
           }
           const lastKey = keys[keys.length - 1];
           current[lastKey] = value;
-          Object.assign(_currentState, newStateCopy); // Apply changes to the actual _currentState
-          targetStateObject = current[lastKey]; // The value set
+          Object.assign(_currentState, newStateCopy);
+          targetStateObject = current[lastKey];
         }
 
         _history.splice(_historyCurrentIndex + 1);
         _history.push(JSON.parse(JSON.stringify(_currentState)));
         _historyCurrentIndex = _history.length - 1;
-        return targetStateObject; // Return the value/object that was set/modified
+        return targetStateObject;
       },
       getState() { return JSON.parse(JSON.stringify(_currentState)); },
       canUndo() { return _historyCurrentIndex > 0; },
@@ -104,8 +124,8 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
     };
   }
 
-  // --- processReturnedValue ---
-  function processReturnedValue(returnedValue, context) {
+  // --- processReturnedValue (Becomes async) ---
+  async function processReturnedValue(returnedValue, context) {
     let output = null;
     if (Array.isArray(returnedValue)) {
       if (returnedValue.every(item => typeof item === 'string') && returnedValue.length > 0) {
@@ -122,16 +142,26 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
           edgeFunctions[key] = returnedValue[key];
         }
       });
+
+      const results = [];
+      for (const k of edgeNames) { // Iterate to await async edge functions sequentially
+        try {
+          const edgeFn = edgeFunctions[k];
+          let result;
+          if (isAsyncFunction(edgeFn)) {
+            result = await edgeFn.apply(context, []);
+          } else {
+            result = edgeFn.apply(context, []);
+          }
+          results.push(result);
+        } catch (e) {
+          console.error(`Error executing edge function for '${k}':`, e);
+          results.push({ error: e.message });
+        }
+      }
       output = {
         edges: edgeNames,
-        results: edgeNames.map(k => {
-          try {
-            return edgeFunctions[k].apply(context, []); // Apply context to edge functions
-          } catch (e) {
-            console.error(`Error executing edge function for '${k}':`, e);
-            return { error: e.message };
-          }
-        })
+        results: results
       };
     } else if (typeof returnedValue === 'string') {
       output = { edges: [returnedValue] };
@@ -141,8 +171,8 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
     return output;
   }
 
-  // --- loopManager (NEW for handling loop logic) ---
-  function loopManager(loopNodesConfig) {
+  // --- loopManager (Becomes async) ---
+  async function loopManager(loopNodesConfig) {
     const loopInternalSteps = [];
     if (!loopNodesConfig || loopNodesConfig.length === 0) {
       const passOutput = { edges: ['pass'] };
@@ -151,24 +181,22 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
 
     const controllerNode = loopNodesConfig[0];
     const actionNodes = loopNodesConfig.slice(1);
-    let maxIterations = 100; // Safety break for infinite loops
+    let maxIterations = 100;
     let iterationCount = 0;
-    let lastLoopIterationOutput = { edges: ['pass'] }; // Default if loop doesn't run meaningfully
+    let lastLoopIterationOutput = { edges: ['pass'] };
 
     while (iterationCount < maxIterations) {
       iterationCount++;
-      // console.log(`Loop iteration: ${iterationCount}, Controller: ${JSON.stringify(controllerNode)}`);
-
       const controllerFM = FlowManager({
         initialState: fmState.getState(),
         nodes: [controllerNode]
       });
-      const controllerRunResult = controllerFM.run(); // Array of steps from controller's execution
+      const controllerRunResult = await controllerFM.run(); // Await async run
       let controllerOutput;
 
       if (controllerRunResult && controllerRunResult.length > 0) {
         controllerOutput = controllerRunResult.at(-1).output;
-        fmState.set(null, controllerFM.getStateManager().getState()); // Update main state
+        fmState.set(null, controllerFM.getStateManager().getState());
         loopInternalSteps.push({
           nodeDetail: `Loop Iter ${iterationCount}: Controller ${typeof controllerNode === 'string' ? controllerNode : 'Complex Controller'}`,
           outputFromController: controllerOutput,
@@ -184,18 +212,16 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
       lastLoopIterationOutput = controllerOutput;
 
       if (controllerOutput.edges.includes('exit')) {
-        // console.log("Loop exit condition met by controller.");
         break;
       }
 
       if (actionNodes.length > 0) {
-        // console.log(`Loop Iter ${iterationCount}: Executing actions:`, actionNodes);
         const actionsFM = FlowManager({
           initialState: fmState.getState(),
           nodes: actionNodes
         });
-        const actionsRunResult = actionsFM.run();
-        fmState.set(null, actionsFM.getStateManager().getState()); // Update main state
+        const actionsRunResult = await actionsFM.run(); // Await async run
+        fmState.set(null, actionsFM.getStateManager().getState());
 
         if (actionsRunResult && actionsRunResult.length > 0) {
           lastLoopIterationOutput = actionsRunResult.at(-1).output;
@@ -217,42 +243,51 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
     return { internalSteps: loopInternalSteps, finalOutput: lastLoopIterationOutput };
   }
 
-  // --- evaluateNode (Modified) ---
-  function evaluateNode(node) {
+  // --- evaluateNode (Becomes async) ---
+  async function evaluateNode(node) {
     let output = null;
-    let returnedValue; // Not necessarily null initially
+    let returnedValue;
     const nodeToRecord = node;
     let subStepsToRecord = null;
     let executionContext;
 
+    // Helper to execute a function (node or scope function) and handle async
+    async function executeFunc(fn, context, ...args) {
+        if (isAsyncFunction(fn)) {
+            return await fn.apply(context, args);
+        } else {
+            return fn.apply(context, args);
+        }
+    }
+
     if (typeof node === 'function') {
       executionContext = { state: fmState };
-      returnedValue = node.apply(executionContext, []);
+      returnedValue = await executeFunc(node, executionContext);
     } else if (typeof node === 'string') {
-      executionContext = { state: fmState, steps, nodes, currentIndex }; // Richer context for scope functions
-      if (scope[node]) {
-        returnedValue = scope[node].apply(executionContext, []);
+      executionContext = { state: fmState, steps, nodes, currentIndex };
+      if (scope && scope[node]) { // Ensure scope exists
+        returnedValue = await executeFunc(scope[node], executionContext);
       } else {
         console.error(`Function ${node} not found in scope.`);
-        returnedValue = { error: () => `Function ${node} not found` };
+        returnedValue = { error: () => `Function ${node} not found` }; // This structure might be problematic for processReturnedValue
+                                                                     // Better to directly set output or throw
+        output = { edges: ['error'], errorDetails: `Function ${node} not found` };
       }
     } else if (Array.isArray(node)) {
-      if (node.length === 1 && Array.isArray(node[0]) && node[0].length > 0) { // Loop: [['controller', ...actions]]
-        // console.log('Loop construct detected:', node[0]);
-        const loopRun = loopManager(node[0]);
+      if (node.length === 1 && Array.isArray(node[0]) && node[0].length > 0) { // Loop
+        const loopRun = await loopManager(node[0]); // Await async loopManager
         output = loopRun.finalOutput;
         subStepsToRecord = loopRun.internalSteps;
-      } else if (node.length > 0) { // Sequential sub-flow: ['node1', 'node2'] or if [[empty_loop_nodes]]
-        // console.log('Sequential sub-flow detected:', node);
+      } else if (node.length > 0) { // Sequential sub-flow
         const subflowFM = FlowManager({
           initialState: fmState.getState(),
           nodes: node
         });
-        const subflowResultSteps = subflowFM.run();
+        const subflowResultSteps = await subflowFM.run(); // Await async run
         fmState.set(null, subflowFM.getStateManager().getState());
         output = subflowResultSteps?.at(-1)?.output || { edges: ['pass'] };
         subStepsToRecord = subflowResultSteps;
-      } else { // Empty array node
+      } else {
         output = {edges: ['pass']};
       }
     } else if (typeof node === 'object' && node !== null) {
@@ -261,36 +296,30 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
       } else {
         const nodeKey = Object.keys(node)[0];
         const nodeValue = node[nodeKey];
-        // Check for Parameterized function call: { 'FunctionName': {param1: value1} }
-        if (typeof nodeValue === 'object' && !Array.isArray(nodeValue) && scope[nodeKey]) {
-          // console.log(`Parameterized call: ${nodeKey} with params:`, nodeValue);
+        if (typeof nodeValue === 'object' && !Array.isArray(nodeValue) && scope && scope[nodeKey]) { // Param Call
           executionContext = { state: fmState, steps, nodes, currentIndex };
-          returnedValue = scope[nodeKey].apply(executionContext, [nodeValue]);
-        } else { // Structural/Conditional node: { 'edge1': 'nodeA', 'edge2': 'nodeB' }
-          // console.log('Conditional/Structural node detected:', node);
+          returnedValue = await executeFunc(scope[nodeKey], executionContext, nodeValue);
+        } else { // Structural/Conditional node
           const prevStepOutput = steps.at(-1)?.output;
           const prevEdges = (prevStepOutput && prevStepOutput.edges) ? prevStepOutput.edges : [];
           let branchTaken = false;
 
-          for (const edgeKey of Object.keys(node)) { // Iterate over defined branches in current node
+          for (const edgeKey of Object.keys(node)) {
             if (prevEdges.includes(edgeKey)) {
-              // console.log(`Conditional branch: '${edgeKey}' matched. Executing:`, node[edgeKey]);
               const branchNode = node[edgeKey];
               const branchFM = FlowManager({
                 initialState: fmState.getState(),
                 nodes: Array.isArray(branchNode) ? branchNode : [branchNode]
               });
-              const branchResultSteps = branchFM.run();
+              const branchResultSteps = await branchFM.run(); // Await async run
               fmState.set(null, branchFM.getStateManager().getState());
-              
               output = branchResultSteps?.at(-1)?.output || { edges: ['pass'] };
               subStepsToRecord = branchResultSteps;
               branchTaken = true;
-              break; 
+              break;
             }
           }
           if (!branchTaken) {
-            // console.log('No matching edge for conditional node:', node, 'Previous output:', prevStepOutput);
             output = { edges: ['pass'] };
           }
         }
@@ -300,66 +329,72 @@ function FlowManager({initialState, nodes}={initialState:{}, nodes:[]}) {
       output = { edges: ['error', 'pass'] };
     }
 
-    // Process returnedValue if a node function was called and output wasn't directly set by array/object logic
     if (returnedValue !== undefined && output === null) {
-      output = processReturnedValue(returnedValue, executionContext);
+      output = await processReturnedValue(returnedValue, executionContext || { state: fmState }); // Await async processReturnedValue
     }
-    
+
     if (!output || typeof output.edges === 'undefined' || !Array.isArray(output.edges)) {
-      // console.warn('Output was malformed or missing for node:', nodeToRecord, 'Original output:', output);
       output = { edges: ['pass'] };
     }
-  
+
     steps.push({ node: nodeToRecord, output, ...(subStepsToRecord && { subSteps: subStepsToRecord }) });
-    nextStep();
+    // nextStep is no longer called here; it's handled by _nextStepInternal's loop
   }
 
-  // --- nextStep ---
-  function nextStep() {
+  // --- _nextStepInternal (Handles the flow asynchronously) ---
+  async function _nextStepInternal() {
     if (currentIndex < nodes.length) {
       currentNode = nodes[currentIndex];
       currentIndex++;
-      evaluateNode(currentNode);
+      await evaluateNode(currentNode); // Await async evaluateNode
+      await _nextStepInternal();     // Continue to the next step
+    } else {
+      // All nodes processed
+      if (_resolveRunPromise) {
+        _resolveRunPromise(JSON.parse(JSON.stringify(steps)));
+        _resolveRunPromise = null;
+        _rejectRunPromise = null;
+      }
     }
   }
 
   // --- Returned API ---
   return {
-    run() {
-      // Reset for a fresh run if called multiple times on the same instance (optional)
-      // currentIndex = 0; 
-      // steps.length = 0;
-      // fmState = StateManager(initialState); // Full reset including state
-      nextStep();
-      return steps; // Or getSteps() for a copy
-    },
-    loop() { // Implement the top-level loop method
-      // console.log("Running FlowManager in top-level loop mode.");
-      if (!nodes || nodes.length === 0) {
-        // console.warn("Top-level loop called with no nodes.");
-        const emptyLoopRes = { node: "EmptyTopLevelLoop", output: { edges: ['pass'] }, subSteps: [] };
-        steps.push(emptyLoopRes);
-        return [emptyLoopRes];
-      }
-      // currentIndex = 0; // Reset internal flow progression for the loop
-      // steps.length = 0;   // Clear previous steps for this specific `loop` invocation
+    async run() {
+      currentIndex = 0;
+      steps.length = 0;
+      // fmState = StateManager(initialState); // Optional: reset state for each run
 
-      const loopResult = loopManager(nodes); // Use all configured nodes for the loop
-      steps.push({
-        node: "TopLevelLoopOverAllNodes",
-        output: loopResult.finalOutput,
-        subSteps: loopResult.internalSteps
+      return new Promise(async (resolve, reject) => {
+        _resolveRunPromise = resolve;
+        _rejectRunPromise = reject; // Store reject for error handling
+
+        if (!nodes || nodes.length === 0) {
+          resolve([]);
+          _resolveRunPromise = null;
+          _rejectRunPromise = null;
+          return;
+        }
+        try {
+          await _nextStepInternal(); // Start the chain
+        } catch (error) {
+          console.error("Error during flow execution:", error);
+          if(_rejectRunPromise) _rejectRunPromise(error); // Reject the main promise
+          _resolveRunPromise = null;
+          _rejectRunPromise = null;
+        }
       });
-      return steps; // Or getSteps()
     },
-    getSteps: () => JSON.parse(JSON.stringify(steps)), // Deep copy
-    getStateManager: () => fmState // Expose StateManager for direct interaction if needed
+
+
+    getSteps: () => JSON.parse(JSON.stringify(steps)),
+    getStateManager: () => fmState
   };
 }
 
-// --- Example Scope & Usage (Your existing examples + loop controller) ---
+// --- Example Scope & Usage ---
 const scope = {
-  pi(params){ // Example: {x: val, y: val}
+  pi(params){
     console.log('THIS in functia pi', this, 'Params:', params);
     return {
       pass: () => 3.14 * (params.x || 1) * (params.y || 1)
@@ -370,10 +405,9 @@ const scope = {
 scope['Rezultat aleator'] = function() {
   const randomValue = Math.random();
   let edge = randomValue > 0.5 ? 'big' : 'small';
-  // console.log('Rezultat aleator:', randomValue, 'Edge:', edge);
   return {
-    [edge]: () => { // This edge function will have `this.state` available
-      this.state.set('rezultatAleator', randomValue); // Example of using state in edge fn
+    [edge]: () => {
+      this.state.set('rezultatAleator', randomValue);
       return randomValue;
     }
   };
@@ -389,20 +423,20 @@ scope['Afiseaza rezultat mic'] = function() {
   return { pass: () => "Mic afisat" };
 };
 
-scope['Mesaj Intimpinare'] = function greet({mesaj, postfix}){ // Destructures params
-  console.log(this.state.get('name') + '::' + mesaj + ' ' + postfix); // Example using this.state
-  return { stop: () => "Salutari!" }; // 'stop' is an edge name
+scope['Mesaj Intimpinare'] = function greet({mesaj, postfix}){
+  console.log(this.state.get('name') + '::' + mesaj + ' ' + postfix);
+  return { stop: () => "Salutari!" };
 };
 
 scope['print'] = function(){
-  console.log( 'PRINT FN::' + Math.ceil(Math.random()*100), 'State:', this.state.getState());
+  console.log( 'PRINT FN::' + Math.ceil(Math.random()*100), 'State (partial):', {name: this.state.get('name'), loopCounter: this.state.get('loopCounter') });
   return { pass: () => true };
 };
 
 scope['With elements'] = function({of}){
   this.state.set('elements', of);
   console.log('With elements - set:', of);
-  return { do: () => true }; // Edge 'do'
+  return { do: () => true };
 };
 
 scope['Print elements'] = function(){
@@ -417,7 +451,6 @@ scope['Print elements'] = function(){
   return { pass: () => "Elements printed" };
 };
 
-// --- Loop Controller Example ---
 scope['Loop Controller'] = function() {
   let count = this.state.get('loopCounter') || 0;
   count++;
@@ -430,7 +463,7 @@ scope['Loop Controller'] = function() {
     };
   } else {
     return {
-      continue: () => 'Continuing at ' + count // 'continue' or any non-'exit' edge
+      continue: () => 'Continuing at ' + count
     };
   }
 };
@@ -445,64 +478,75 @@ scope['Reset Counter'] = function() {
   return "pass";
 }
 
-// --- Test Flow ---
-const flowManager = FlowManager({
-  initialState:{
-    name: 'Test Flow Initial',
-    a: 8,
-    b: 5,
-    d: { x: 111, y: 200 },
-    loopCounter: 0 // Initialize for loop controller
-  }, 
-  nodes:[
-    'Reset Counter', // Reset counter before loop
-    // Loop example: controller and one action. Will run 3 times.
-    [['Loop Controller', 'Loop Action', 'print']], 
-    'Rezultat aleator', 
-    { // Conditional based on 'Rezultat aleator'
-      'big': 'Afiseaza rezultat mare',
-      'small': ['Afiseaza rezultat mic', 'print'] // Sub-flow for 'small' branch
-    },
-    {'Mesaj Intimpinare': {'mesaj': 'Salut Petru', 'postfix': '!!!'}},
-    {'With elements': {'of': ['el1', 'el2', 'el3']}}, // Parameterized call
-    { // Conditional based on output of 'With elements' (which is 'do')
-      'do': 'Print elements', 
-      'pass': 'print' // Fallback if 'do' wasn't the edge (though it will be)
-    },
-    ['print','print'], // Sequential sub-flow
-    { // Conditional based on previous 'print' (which is 'pass')
-      'pass': [ {'Mesaj Intimpinare': {'mesaj': 'Flow in FLOW', 'postfix': '!!'}} ] // Nested sub-flow in branch
-    },
-    // Example of a loop that will use maxIterations because 'print' doesn't 'exit'
-    // [['print']] // This would be an infinite loop (stopped by maxIterations) if 'print' doesn't change to emit 'exit'
-  ]
-});
+// New Async Task for testing
+scope['Async Task'] = async function() {
+  console.log('Async Task: Starting (will wait 1 second)...');
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  this.state.set('asyncResult', 'Async task successfully completed');
+  console.log('Async Task: Finished.');
+  return { pass: () => 'Async Done' };
+};
 
-const executedSteps = flowManager.run();
-console.log("--- FINAL EXECUTED STEPS ---");
-// console.log(JSON.stringify(executedSteps, null, 2)); // Full dump can be very large
-executedSteps.forEach((step, i) => {
-    console.log(`Step ${i}: Node: ${typeof step.node === 'string' ? step.node : JSON.stringify(step.node).substring(0,50)}... Output Edges: ${step.output.edges}`);
-    if(step.subSteps) {
-        console.log(`    Contains ${step.subSteps.length} sub-steps.`);
-    }
-});
+scope['Check Async Result'] = function() {
+    console.log('Check Async Result:', this.state.get('asyncResult'));
+    return 'pass';
+};
 
-console.log("--- FINAL STATE ---");
-console.log(JSON.stringify(flowManager.getStateManager().getState(), null, 2));
 
-// Example of using the top-level loop() method (less common)
-/*
-const loopingFlow = FlowManager({
-    initialState: { loopCounter: 0, name: "Top Level Looping Flow" },
-    nodes: [ // These nodes will form a loop: node[0] is controller, rest are actions
-        'Loop Controller', // Controller
-        'Loop Action',     // Action
-        {'Mesaj Intimpinare': {mesaj: "Inside top loop", postfix:"iteration!"}} // Action
+// --- Test Flow (needs to be run in an async context) ---
+async function runTestFlow() {
+  const flowManager = FlowManager({
+    initialState:{
+      name: 'Test Flow Initial',
+      a: 8,
+      b: 5,
+      d: { x: 111, y: 200 },
+      loopCounter: 0
+    },
+    nodes:[
+      'Reset Counter',
+      ['Loop Controller', 'Loop Action', 'print'],
+      'Async Task', // Add the async task
+      'Check Async Result', // Check state after async task
+      'Rezultat aleator',
+      {
+        'big': 'Afiseaza rezultat mare',
+        'small': ['Afiseaza rezultat mic', 'print']
+      },
+      {'Mesaj Intimpinare': {'mesaj': 'Salut Petru', 'postfix': '!!!'}},
+      {'With elements': {'of': ['el1', 'el2', 'el3']}},
+      {
+        'do': 'Print elements',
+        'pass': 'print'
+      },
+      ['print','print'],
+      {
+        'pass': [ {'Mesaj Intimpinare': {'mesaj': 'Flow in FLOW', 'postfix': '!!'}} ]
+      },
     ]
-});
-console.log("\n--- TESTING TOP-LEVEL LOOP ---");
-const loopingFlowSteps = loopingFlow.loop();
-console.log(JSON.stringify(loopingFlow.getStateManager().getState(), null, 2));
-// console.log(JSON.stringify(loopingFlowSteps, null, 2));
-*/
+  });
+
+  console.log("--- STARTING FLOW EXECUTION ---");
+  try {
+    const executedSteps = await flowManager.run(); // Await the run() method
+    console.log("--- FINAL EXECUTED STEPS ---");
+    executedSteps.forEach((step, i) => {
+        const nodeString = typeof step.node === 'string' ? step.node : JSON.stringify(step.node);
+        console.log(`Step ${i}: Node: ${nodeString.substring(0,70)}${nodeString.length > 70 ? '...' : ''} Output Edges: ${step.output.edges}`);
+        if(step.subSteps) {
+            console.log(`    Contains ${step.subSteps.length} sub-steps.`);
+        }
+    });
+
+    console.log("--- FINAL STATE ---");
+    console.log(JSON.stringify(flowManager.getStateManager().getState(), null, 2));
+  } catch (error) {
+    console.error("--- FLOW EXECUTION FAILED ---");
+    console.error(error);
+  }
+
+
+}
+
+// Execute the test flow
+runTestFlow();
