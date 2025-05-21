@@ -2,7 +2,8 @@
  * GlobalPauseResumeManager: A singleton manager for handling pause and resume operations
  * across all FlowManager instances. It allows workflows to request human intervention
  * and for an external UI layer (or any service) to respond and resume the flow.
- * This version uses a custom, environment-agnostic event bus.
+ * This version uses a custom, environment-agnostic event bus and also handles
+ * step events from FlowManager instances.
  */
 const GlobalPauseResumeManager = (function() {
     // _pausedFlows: Stores active pause states.
@@ -30,7 +31,7 @@ const GlobalPauseResumeManager = (function() {
     return {
         /**
          * Emits an event to all registered listeners for that event type.
-         * @param {string} eventName - The name of the event (e.g., 'flowPaused').
+         * @param {string} eventName - The name of the event (e.g., 'flowPaused', 'flowManagerStep').
          * @param {object} eventData - The data to be passed to the listeners.
          */
         _emitEvent(eventName, eventData) {
@@ -48,8 +49,8 @@ const GlobalPauseResumeManager = (function() {
         },
 
         /**
-         * Adds an event listener for pause/resume events.
-         * @param {string} eventName - Event to listen for ('flowPaused', 'flowResumed', 'resumeFailed').
+         * Adds an event listener for events.
+         * @param {string} eventName - Event to listen for ('flowPaused', 'flowResumed', 'resumeFailed', 'flowManagerStep').
          * @param {Function} callback - The function to call when the event occurs. The callback will receive the eventData object.
          */
         addEventListener(eventName, callback) {
@@ -90,7 +91,6 @@ const GlobalPauseResumeManager = (function() {
                     console.warn(`[GlobalPauseResumeManager] Pause ID ${pauseId} is already active. Overwriting the resolver for ${pauseId}.`);
                 }
                 _pausedFlows.set(pauseId, { resolve, details, flowInstanceId });
-                // Emit event with relevant data
                 this._emitEvent('flowPaused', { pauseId, details, flowInstanceId });
                 console.log(`[GlobalPauseResumeManager] Flow ${flowInstanceId} paused. ID: ${pauseId}. Details: ${JSON.stringify(details)}. Waiting for resume...`);
             });
@@ -107,13 +107,11 @@ const GlobalPauseResumeManager = (function() {
                 const { resolve, details, flowInstanceId } = _pausedFlows.get(pauseId);
                 resolve(resumeData);
                 _pausedFlows.delete(pauseId);
-                // Emit event with relevant data
                 this._emitEvent('flowResumed', { pauseId, resumeData, details, flowInstanceId });
                 console.log(`[GlobalPauseResumeManager] Flow ${flowInstanceId} resumed. ID: ${pauseId} with data:`, resumeData);
                 return true;
             } else {
                 console.warn(`[GlobalPauseResumeManager] No active pause found for ID: ${pauseId}. Cannot resume.`);
-                // Emit event with relevant data
                 this._emitEvent('resumeFailed', { pauseId, reason: 'No active pause found' });
                 return false;
             }
@@ -149,6 +147,8 @@ const GlobalPauseResumeManager = (function() {
  * as serializable JSON-like structures, enabling dynamic generation, persistence,
  * and execution of directed graphs of tasks and decisions.
  *
+ * Emits a 'flowManagerStep' event via GlobalPauseResumeManager after each step is executed.
+ *
  * @param {object} config - Configuration for the FlowManager.
  * @param {object} [config.initialState={}] - The initial state for the workflow.
  * @param {Array} [config.nodes=[]] - An array defining the workflow's structure.
@@ -163,6 +163,8 @@ function FlowManager({initialState, nodes, instanceId}={initialState:{}, nodes:[
   const fmState = StateManager(initialState);
   let _resolveRunPromise = null;
   let _rejectRunPromise = null;
+
+  // No instance-specific event listeners here anymore. All events go through GlobalPauseResumeManager.
 
   function isAsyncFunction(fn) {
     if (!fn) return false;
@@ -326,9 +328,13 @@ function FlowManager({initialState, nodes, instanceId}={initialState:{}, nodes:[
     }
     const controllerNode = loopNodesConfig[0];
     const actionNodes = loopNodesConfig.slice(1);
-    let maxIterations = 100;
+    let maxIterations = 100; // Default max iterations
     let iterationCount = 0;
     let lastLoopIterationOutput = { edges: ['pass'] };
+
+    // Check if controllerNode has maxIterations specified (e.g. { 'Loop Controller': { maxIterations: 5 }})
+    // This is an example of how one might pass configurations to loop controllers.
+    // For simplicity, this specific example doesn't implement reading maxIterations from node config yet.
 
     while (iterationCount < maxIterations) {
       iterationCount++;
@@ -338,11 +344,12 @@ function FlowManager({initialState, nodes, instanceId}={initialState:{}, nodes:[
         nodes: [controllerNode],
         instanceId: `${loopIterationInstanceId}-ctrl`
       });
+      // 'flowManagerStep' events from this sub-FM will be emitted to GlobalPauseResumeManager
       const controllerRunResult = await controllerFM.run();
       let controllerOutput;
       if (controllerRunResult && controllerRunResult.length > 0) {
         controllerOutput = controllerRunResult.at(-1).output;
-        fmState.set(null, controllerFM.getStateManager().getState());
+        fmState.set(null, controllerFM.getStateManager().getState()); // Update parent state
         loopInternalSteps.push({
           nodeDetail: `Loop Iter ${iterationCount}: Controller ${typeof controllerNode === 'string' ? controllerNode : 'Complex Controller'}`,
           outputFromController: controllerOutput,
@@ -350,34 +357,35 @@ function FlowManager({initialState, nodes, instanceId}={initialState:{}, nodes:[
         });
       } else {
         console.warn(`[FlowManager:${flowInstanceId}] Loop controller did not produce output. Exiting loop.`);
-        controllerOutput = { edges: ['exit'] };
+        controllerOutput = { edges: ['exit'] }; // Default to exit if no output
         loopInternalSteps.push({
           nodeDetail: `Loop Iter ${iterationCount}: Controller Error`, outputFromController: controllerOutput,
         });
       }
-      lastLoopIterationOutput = controllerOutput;
-      if (controllerOutput.edges.includes('exit')) break;
+      lastLoopIterationOutput = controllerOutput; // Track the latest output from this iteration
+      if (controllerOutput.edges.includes('exit')) break; // Controller signals loop termination
 
-      if (actionNodes.length > 0) {
+      if (actionNodes.length > 0 && controllerOutput.edges.some(edge => edge !== 'exit' && edge !== 'exit_forced')) { // Only run actions if not exiting
         const actionsFM = FlowManager({
           initialState: fmState.getState(),
           nodes: actionNodes,
           instanceId: `${loopIterationInstanceId}-actions`
         });
         const actionsRunResult = await actionsFM.run();
-        fmState.set(null, actionsFM.getStateManager().getState());
+        fmState.set(null, actionsFM.getStateManager().getState()); // Update parent state
         if (actionsRunResult && actionsRunResult.length > 0) {
-          lastLoopIterationOutput = actionsRunResult.at(-1).output;
+          lastLoopIterationOutput = actionsRunResult.at(-1).output; // Update last output with action's output
           loopInternalSteps.push({
             nodeDetail: `Loop Iter ${iterationCount}: Actions`, outputFromActions: lastLoopIterationOutput, actionSubSteps: actionsRunResult
           });
         } else {
            loopInternalSteps.push({ nodeDetail: `Loop Iter ${iterationCount}: Actions (no output/steps)`, actionSubSteps: actionsRunResult || [] });
         }
-      }
+      } // else: skip actions if controller said 'exit' or if no actionNodes
+
       if (iterationCount >= maxIterations) {
         console.warn(`[FlowManager:${flowInstanceId}] Loop reached max iterations (${maxIterations}). Forcing exit.`);
-        lastLoopIterationOutput = { edges: ['exit_forced'] };
+        lastLoopIterationOutput = { edges: ['exit_forced'] }; // Special edge for max iterations
         loopInternalSteps.push({ nodeDetail: "Loop Max Iterations Reached", output: lastLoopIterationOutput });
         break;
       }
@@ -388,12 +396,15 @@ function FlowManager({initialState, nodes, instanceId}={initialState:{}, nodes:[
   async function evaluateNode(node) {
     let output = null;
     let returnedValue;
-    const nodeToRecord = node;
-    let subStepsToRecord = null;
+    const nodeToRecord = node; // The original node definition
+    let subStepsToRecord = null; // For sub-flows, loops, branches
 
     const baseExecutionContext = {
         state: fmState,
-        steps, nodes, currentIndex,
+        // currentStep: steps.length, // steps array might not be fully updated for current node yet
+        steps, // Provides access to *previous* steps' history
+        nodes, // The full list of nodes for this FlowManager instance
+        currentIndex, // The index of the *current* node being processed (1-based for user, 0-based internally)
         humanInput: async (details, customPauseId) => {
             console.log(`[FlowManager:${flowInstanceId}] Node (or edge function) requests human input. Details:`, details, "Pause ID hint:", customPauseId);
             const resumeData = await GlobalPauseResumeManager.requestPause({
@@ -407,46 +418,47 @@ function FlowManager({initialState, nodes, instanceId}={initialState:{}, nodes:[
     };
 
     async function executeFunc(fn, context, ...args) {
-        return await Promise.resolve(fn.apply(context, args)); // Await as fn might call humanInput
+        return await Promise.resolve(fn.apply(context, args));
     }
 
     if (typeof node === 'function') {
       returnedValue = await executeFunc(node, baseExecutionContext);
     } else if (typeof node === 'string') {
-      if (scope && scope[node]) {
+      if (scope && scope[node]) { // Relies on global 'scope'
         returnedValue = await executeFunc(scope[node], baseExecutionContext);
       } else {
         console.error(`[FlowManager:${flowInstanceId}] Function ${node} not found in scope.`);
         output = { edges: ['error'], errorDetails: `Function ${node} not found` };
       }
     } else if (Array.isArray(node)) {
-      if (node.length === 1 && Array.isArray(node[0]) && node[0].length > 0) {
+      if (node.length === 1 && Array.isArray(node[0]) && node[0].length > 0) { // Loop construct: [[controller, ...actions]]
         const loopRun = await loopManager(node[0]);
         output = loopRun.finalOutput;
         subStepsToRecord = loopRun.internalSteps;
-      } else if (node.length > 0) {
+      } else if (node.length > 0) { // Subflow construct: [node1, node2, ...]
         const subflowFM = FlowManager({
           initialState: fmState.getState(),
           nodes: node,
-          instanceId: `${flowInstanceId}-subflow${currentIndex}`
+          instanceId: `${flowInstanceId}-subflow-idx${currentIndex-1}` // Subflow ID includes parent's current node index
         });
         const subflowResultSteps = await subflowFM.run();
-        fmState.set(null, subflowFM.getStateManager().getState());
+        fmState.set(null, subflowFM.getStateManager().getState()); // Update parent state with subflow's final state
         output = subflowResultSteps?.at(-1)?.output || { edges: ['pass'] };
         subStepsToRecord = subflowResultSteps;
-      } else {
+      } else { // Empty array
         output = {edges: ['pass']};
       }
-    } else if (typeof node === 'object' && node !== null) {
-      if (Object.keys(node).length === 0) {
+    } else if (typeof node === 'object' && node !== null) { // Object node: branch or function call with params
+      if (Object.keys(node).length === 0) { // Empty object
         output = { edges: ['pass'] };
       } else {
         const nodeKey = Object.keys(node)[0];
         const nodeValue = node[nodeKey];
+        // Check if it's a function call with parameters: { 'funcName': {param1: value1} }
         if (typeof nodeValue === 'object' && !Array.isArray(nodeValue) && scope && scope[nodeKey]) {
           returnedValue = await executeFunc(scope[nodeKey], baseExecutionContext, nodeValue);
-        } else {
-          const prevStepOutput = steps.at(-1)?.output;
+        } else { // Branching construct: { 'edgeName1': nodeA, 'edgeName2': nodeB }
+          const prevStepOutput = steps.at(-1)?.output; // Output from the immediately preceding step
           const prevEdges = (prevStepOutput && prevStepOutput.edges) ? prevStepOutput.edges : [];
           let branchTaken = false;
           for (const edgeKey of Object.keys(node)) {
@@ -455,20 +467,20 @@ function FlowManager({initialState, nodes, instanceId}={initialState:{}, nodes:[
               const branchFM = FlowManager({
                 initialState: fmState.getState(),
                 nodes: Array.isArray(branchNode) ? branchNode : [branchNode],
-                instanceId: `${flowInstanceId}-branch-${edgeKey}-${currentIndex}`
+                instanceId: `${flowInstanceId}-branch-${edgeKey}-idx${currentIndex-1}` // Branch ID includes edge and parent's index
               });
               const branchResultSteps = await branchFM.run();
-              fmState.set(null, branchFM.getStateManager().getState());
+              fmState.set(null, branchFM.getStateManager().getState()); // Update parent state
               output = branchResultSteps?.at(-1)?.output || { edges: ['pass'] };
               subStepsToRecord = branchResultSteps;
               branchTaken = true;
-              break;
+              break; // Take the first matching branch
             }
           }
-          if (!branchTaken) output = { edges: ['pass'] };
+          if (!branchTaken) output = { edges: ['pass'] }; // No matching edge from previous step, default to 'pass' for the branch node itself
         }
       }
-    } else {
+    } else { // Unknown node type
       console.warn(`[FlowManager:${flowInstanceId}] Unknown node type or unhandled case:`, node);
       output = { edges: ['error', 'pass'] };
     }
@@ -481,15 +493,24 @@ function FlowManager({initialState, nodes, instanceId}={initialState:{}, nodes:[
       output = { ...output, edges: ['pass'] };
     }
     steps.push({ node: nodeToRecord, output, ...(subStepsToRecord && { subSteps: subStepsToRecord }) });
+
+    // Emit 'flowManagerStep' event via GlobalPauseResumeManager
+    GlobalPauseResumeManager._emitEvent('flowManagerStep', {
+      flowInstanceId: flowInstanceId,
+      stepIndex: currentIndex - 1, // 0-based index of the node just processed
+      stepData: JSON.parse(JSON.stringify(steps.at(-1))), // Deep copy of the last recorded step
+      currentState: fmState.getState() // State *after* this step
+    });
   }
 
   async function _nextStepInternal() {
     if (currentIndex < nodes.length) {
       currentNode = nodes[currentIndex];
-      currentIndex++;
+      currentIndex++; // Increment current index *before* processing the node at this index
       await evaluateNode(currentNode);
-      await _nextStepInternal();
+      await _nextStepInternal(); // Recurse for the next step
     } else {
+      // All nodes processed
       if (_resolveRunPromise) {
         _resolveRunPromise(JSON.parse(JSON.stringify(steps)));
         _resolveRunPromise = null; _rejectRunPromise = null;
@@ -500,18 +521,19 @@ function FlowManager({initialState, nodes, instanceId}={initialState:{}, nodes:[
   return {
     async run() {
       currentIndex = 0;
-      steps.length = 0;
+      steps.length = 0; // Clear steps for a fresh run
       return new Promise(async (resolve, reject) => {
         _resolveRunPromise = resolve; _rejectRunPromise = reject;
         if (!nodes || nodes.length === 0) {
           resolve([]); _resolveRunPromise = null; _rejectRunPromise = null; return;
         }
         try {
-          console.log(`[FlowManager:${flowInstanceId}] Starting execution.`);
+          console.log(`[FlowManager:${flowInstanceId}] Starting execution. Total nodes: ${nodes.length}`);
           await _nextStepInternal();
           console.log(`[FlowManager:${flowInstanceId}] Execution finished.`);
         } catch (error) {
           console.error(`[FlowManager:${flowInstanceId}] Error during flow execution:`, error);
+          // Emit an error event or log centrally if needed
           if(_rejectRunPromise) _rejectRunPromise(error);
           _resolveRunPromise = null; _rejectRunPromise = null;
         }
@@ -520,13 +542,14 @@ function FlowManager({initialState, nodes, instanceId}={initialState:{}, nodes:[
     getSteps: () => JSON.parse(JSON.stringify(steps)),
     getStateManager: () => fmState,
     getInstanceId: () => flowInstanceId
+    // No addEventListener/removeEventListener on the instance directly
   };
 }
 
 // --- Example Scope & Usage ---
-const scope = {
+const scope = { // Global scope for function nodes
   pi(params){
-    console.log('THIS in functia pi (scope function context):', this, 'Params:', params);
+    console.log('[Scope:pi] PARAMS:', params, 'STATE (loopCounter):', this.state.get('loopCounter'));
     return {
       pass: () => 3.14 * (params.x || 1) * (params.y || 1)
     };
@@ -536,7 +559,7 @@ const scope = {
 scope['Rezultat aleator'] = function() {
   const randomValue = Math.random();
   let edge = randomValue > 0.5 ? 'big' : 'small';
-  console.log(`Rezultat aleator: ${randomValue}, Edge chosen: ${edge}`);
+  console.log(`[Scope:Rezultat aleator] Value: ${randomValue}, Edge: ${edge}`);
   return {
     [edge]: () => {
       this.state.set('rezultatAleator', randomValue);
@@ -546,39 +569,45 @@ scope['Rezultat aleator'] = function() {
 };
 
 scope['Afiseaza rezultat mare'] = function() {
-  console.log('E MARE! Valoare:', this.state.get('rezultatAleator'));
+  console.log('[Scope:Afiseaza rezultat mare] Valoare:', this.state.get('rezultatAleator'));
   return { pass: () => "Mare afisat" };
 };
 
 scope['Afiseaza rezultat mic'] = function() {
-  console.log('E MIC! Valoare:', this.state.get('rezultatAleator'));
+  console.log('[Scope:Afiseaza rezultat mic] Valoare:', this.state.get('rezultatAleator'));
   return { pass: () => "Mic afisat" };
 };
 
 scope['Mesaj Intimpinare'] = function greet({mesaj, postfix}){
-  console.log(this.state.get('name') + '::' + mesaj + ' ' + postfix);
-  return { stop: () => "Salutari!" };
+  console.log(`[Scope:Mesaj Intimpinare] ${this.state.get('name')}::${mesaj} ${postfix}`);
+  return { stop: () => "Salutari!" }; // 'stop' is an example edge
 };
 
 scope['print'] = function(){
-  console.log( 'PRINT FN::' + Math.ceil(Math.random()*100), 'State (partial):', {name: this.state.get('name'), loopCounter: this.state.get('loopCounter'), lastUserInput: this.state.get('lastUserInput') });
+  const stateSnapshot = {
+      name: this.state.get('name'),
+      loopCounter: this.state.get('loopCounter'),
+      lastUserInput: this.state.get('lastUserInput'),
+      rezultatAleator: this.state.get('rezultatAleator')
+  };
+  console.log('[Scope:print] Random number:', Math.ceil(Math.random()*100), 'Partial State:', stateSnapshot);
   return { pass: () => true };
 };
 
 scope['With elements'] = function({of}){
   this.state.set('elements', of);
-  console.log('With elements - set these elements in state:', of);
-  return { do: () => true };
+  console.log('[Scope:With elements] Set elements in state:', of);
+  return { do: () => true }; // 'do' is an example edge
 };
 
 scope['Print elements'] = function(){
   const elements = this.state.get('elements');
   if (elements && elements.length > 0) {
     elements.forEach((element, index) => {
-      console.log('Element ' + index + ':', element);
+      console.log(`[Scope:Print elements] Element ${index}:`, element);
     });
   } else {
-    console.log('Print elements: No elements found in state.');
+    console.log('[Scope:Print elements] No elements found.');
   }
   return { pass: () => "Elements printed" };
 };
@@ -587,55 +616,57 @@ scope['Loop Controller'] = function() {
   let count = this.state.get('loopCounter') || 0;
   count++;
   this.state.set('loopCounter', count);
-  console.log('Loop Controller: iteration count =', count);
-  if (count >= 3) {
-    this.state.set('loopMessage', 'Loop finished by controller');
+  console.log(`[Scope:Loop Controller] Iteration: ${count}`);
+  if (count >= 3) { // Loop 3 times (1, 2, 3)
+    this.state.set('loopMessage', 'Loop finished by controller after 3 iterations');
     return {
-      exit: () => 'Exited at ' + count
+      exit: () => `Exited at iteration ${count}`
     };
   } else {
     return {
-      continue: () => 'Continuing at ' + count
+      continue: () => `Continuing at iteration ${count}`
     };
   }
 };
 
 scope['Loop Action'] = function() {
-  console.log('Loop Action: Executing. Current count from state:', this.state.get('loopCounter'));
-  this.state.set('actionDoneInLoop', true);
-  return { pass: () => 'Action completed' };
+  console.log('[Scope:Loop Action] Executing. Loop counter from state:', this.state.get('loopCounter'));
+  this.state.set('actionDoneInLoop', `Iteration ${this.state.get('loopCounter')}`);
+  return { pass: () => 'Action completed for iteration' };
 };
 
 scope['Reset Counter'] = function() {
   this.state.set('loopCounter', 0);
-  console.log('Counter Reset');
-  return "pass";
+  this.state.set('loopMessage', null); // Clear previous loop messages
+  this.state.set('actionDoneInLoop', null);
+  console.log('[Scope:Reset Counter] Counter reset to 0.');
+  return "pass"; // Simple string return means { edges: ['pass'] }
 }
 
 scope['Async Task'] = async function() {
-  console.log('Async Task: Starting (simulating a 1-second delay)...');
+  console.log('[Scope:Async Task] Starting (simulating 1s delay)...');
   await new Promise(resolve => setTimeout(resolve, 1000));
-  this.state.set('asyncResult', 'Async task successfully completed');
-  console.log('Async Task: Finished.');
+  this.state.set('asyncResult', 'Async task successfully completed at ' + new Date().toLocaleTimeString());
+  console.log('[Scope:Async Task] Finished.');
   return { pass: () => 'Async Done' };
 };
 
 scope['Check Async Result'] = function() {
-    console.log('Check Async Result (from state):', this.state.get('asyncResult'));
+    console.log('[Scope:Check Async Result] From state:', this.state.get('asyncResult'));
     return 'pass';
 };
 
 scope['Request User Input'] = async function(params) {
   const question = params.question || "Please provide your input:";
-  console.log(`[Request User Input] Node is asking: "${question}"`);
+  console.log(`[Scope:Request User Input] Asking: "${question}"`);
   const userInput = await this.humanInput(
     { type: 'text_input', prompt: question, defaultValue: params.default || "" },
-    params.pauseId || `user-input-${this.state.get('name') || 'generic'}`
+    params.pauseId || `user-input-${this.state.get('name') || 'generic'}-${Date.now()%10000}` // More unique pauseId
   );
-  console.log(`[Request User Input] Received input from human:`, userInput);
+  console.log(`[Scope:Request User Input] Received:`, userInput);
   this.state.set('lastUserInput', userInput);
   return {
-    received: () => `Input received: ${userInput.text ? userInput.text.substring(0,50) : JSON.stringify(userInput)}`
+    received: () => `Input: ${userInput.text ? userInput.text.substring(0,50) : JSON.stringify(userInput)}`
   };
 };
 
@@ -643,24 +674,37 @@ scope['Confirm Action'] = async function(params) {
     const confirmationDetails = {
         type: 'confirmation',
         message: params.message || "Are you sure you want to proceed?",
-        options: ["Yes, Proceed", "No, Cancel"], // For browser `confirm`, these map to OK/Cancel
+        options: params.options || ["Yes, Proceed", "No, Cancel"],
         payload: params.payload
     };
-    console.log(`[Confirm Action] Requesting confirmation: "${confirmationDetails.message}"`);
-    const decision = await this.humanInput(confirmationDetails, `confirm-${params.actionId || 'action'}`);
-    // Browser mock's confirm() will return true for "Yes, Proceed" (OK) and false for "No, Cancel" (Cancel)
-    // and we map this to a choice object.
-    if (decision && decision.choice === "Yes, Proceed") {
-        this.state.set(`confirmation.${params.actionId || 'action'}`, 'confirmed');
-        console.log(`[Confirm Action] Action Confirmed by user.`);
+    const pauseIdSuffix = params.actionId || 'action';
+    console.log(`[Scope:Confirm Action] Requesting confirmation: "${confirmationDetails.message}" for ${pauseIdSuffix}`);
+    const decision = await this.humanInput(confirmationDetails, `confirm-${pauseIdSuffix}-${Date.now()%10000}`);
+
+    if (decision && decision.choice === (confirmationDetails.options[0] || "Yes, Proceed")) {
+        this.state.set(`confirmation.${pauseIdSuffix}`, 'confirmed');
+        console.log(`[Scope:Confirm Action] Action '${pauseIdSuffix}' Confirmed by user.`);
         return { confirmed: () => "Action confirmed" };
     } else {
-        this.state.set(`confirmation.${params.actionId || 'action'}`, 'cancelled');
-        console.log(`[Confirm Action] Action Cancelled by user.`);
+        this.state.set(`confirmation.${pauseIdSuffix}`, 'cancelled');
+        console.log(`[Scope:Confirm Action] Action '${pauseIdSuffix}' Cancelled by user.`);
         return { cancelled: () => "Action cancelled" };
     }
 };
-
+scope['insideLoopPauseBrowser'] = async function() {
+  const loopCount = this.state.get('loopCounter');
+            console.log(`[Node:InsideLoopPause] Iteration ${loopCount}, asking for HITL (browser).`);
+            const approval = await this.humanInput(
+                { type: 'confirmation', prompt: `Loop ${loopCount}: Approve browser iteration?`, options: ['Approve Iteration', 'Skip Iteration'] },
+                `loop-iter-approval-browser-${loopCount}`
+            );
+            if (approval && approval.choice === 'Approve Iteration') {
+                this.state.set(`loopIter${loopCount}Approval`, 'Approved');
+                return "approved_iteration_browser"; // Edge for next step in *this loop iteration* if any, or influences loop's overall output if it's the last action.
+            }
+            this.state.set(`loopIter${loopCount}Approval`, 'Skipped');
+            return "skipped_iteration_browser";
+}
 // --- Test Flow Execution (Browser Focused) ---
 async function runTestFlowBrowser() {
   const flowManager = FlowManager({
@@ -670,49 +714,72 @@ async function runTestFlowBrowser() {
     },
     nodes:[
       'Reset Counter',
-      { 'Request User Input': { question: "What is your favorite color for this browser test?", pauseId: "fav-color-query" } },
-      { 'received': 'print'},
-      [['Loop Controller',
-        async function insideLoopPauseBrowser() {
-            const loopCount = this.state.get('loopCounter');
-            console.log(`Inside loop (iteration ${loopCount}), about to ask for HITL (browser).`);
-            const approval = await this.humanInput(
-                { type: 'confirmation', prompt: `Loop ${loopCount}: Approve this browser iteration?`, options: ['Approve Iteration', 'Skip Iteration'] },
-                `loop-iter-approval-browser-${loopCount}`
-            );
-            // Browser mock will send { choice: 'Approve Iteration' } or { choice: 'Skip Iteration' }
-            if (approval && approval.choice === 'Approve Iteration') {
-                this.state.set(`loopIter${loopCount}Approval`, 'Approved');
-                return "approved_iteration_browser";
-            }
-            this.state.set(`loopIter${loopCount}Approval`, 'Skipped');
-            return "skipped_iteration_browser";
-        },
-       'Loop Action', 'print'
-      ]],
-      {
-        'approved_iteration_browser': () => console.log("Browser loop iteration was approved."),
-        'skipped_iteration_browser': () => console.log("Browser loop iteration was skipped.")
+      { 'Request User Input': { question: "Favorite color for browser test?", pauseId: "fav-color-query" } },
+      { 'received': ['print'] }, // Branch based on 'received' edge from previous step
+      [['Loop Controller', // This is a loop node: [[controller, action1, action2, ...]]
+        'insideLoopPauseBrowser', // Action in the loop
+       'Loop Action', // Another action in the loop
+       'print'        // Yet another action in the loop
+      ]], // End of loop node definition
+      { // This is a branch node, reacting to the *final output* of the loop node above
+        'exit': [ 'print'], // 'exit' edge from Loop Controller
+        'exit_forced': ['print'], // 'exit_forced' edge from Loop Manager
+        // If the loop's last action emits 'approved_iteration_browser' or 'skipped_iteration_browser' and the loop *also* exits
+        // (e.g., controller says 'exit' after the last action), then 'exit' takes precedence for branching *after* the loop.
+        // If the loop *continues* after such an edge, that edge is internal to the loop's iteration.
+        // For simplicity, we assume 'exit' or 'exit_forced' are the primary edges from the loop for post-loop branching.
+        // A 'pass' edge can be a fallback if the loop structure is more complex.
+        'pass': [ 'print']
       },
       'Async Task',
       'Check Async Result',
       { 'Confirm Action': { message: "Finalize this browser flow example?", actionId: "browser-flow-end" } },
-      {
-        'confirmed': [ 'print', {'Mesaj Intimpinare': {mesaj: 'Browser Flow Confirmed & Finalized', postfix:'!!'}} ],
-        'cancelled': [ 'print', {'Mesaj Intimpinare': {mesaj: 'Browser Flow Cancelled by User', postfix:'...'}} ]
+      { // This is a branch node
+        'confirmed': [ 'print', {'Mesaj Intimpinare': {mesaj: 'Browser Flow Confirmed & Finalized', postfix:'!!'}} ], // Subflow
+        'cancelled': [ 'print', {'Mesaj Intimpinare': {mesaj: 'Browser Flow Cancelled by User', postfix:'...'}} ]  // Subflow
       },
     ]
   });
+
+  // Add listener for 'flowManagerStep' event to GlobalPauseResumeManager
+  GlobalPauseResumeManager.addEventListener('flowManagerStep', (eventData) => {
+    const nodeRepresentation = typeof eventData.stepData.node === 'string' ?
+        eventData.stepData.node :
+        (typeof eventData.stepData.node === 'function' ? eventData.stepData.node.name || 'anonymous function' : JSON.stringify(eventData.stepData.node));
+
+    console.groupCollapsed(
+        `%c[FlowTracer - ${eventData.flowInstanceId}] Step ${eventData.stepIndex}: ${nodeRepresentation.substring(0,70)}${nodeRepresentation.length > 70 ? '...' : ''}`,
+        'color: purple; font-weight: normal;'
+    );
+    console.log(`  Flow Instance ID: ${eventData.flowInstanceId}`);
+    console.log(`  Step Index: ${eventData.stepIndex}`);
+    console.log(`  Node Definition:`, eventData.stepData.node);
+    console.log(`  Output Edges:`, eventData.stepData.output.edges);
+    if (eventData.stepData.output.results && eventData.stepData.output.results.length > 0) {
+      console.log(`  Output Results:`, eventData.stepData.output.results);
+    }
+    if (eventData.stepData.subSteps && eventData.stepData.subSteps.length > 0) {
+        console.log(`  Sub-steps count: ${eventData.stepData.subSteps.length}`);
+        // console.log(`  Sub-steps details:`, eventData.stepData.subSteps); // Can be very verbose
+    }
+    // console.log(`  Current State (after step):`, eventData.currentState); // Can be very verbose
+    console.groupEnd();
+  });
+
+
   console.log(`--- STARTING BROWSER FLOW EXECUTION (Instance ID: ${flowManager.getInstanceId()}) ---`);
   try {
     const executedSteps = await flowManager.run();
-    console.log("--- FINAL EXECUTED STEPS (Browser Workflow Audit Trail) ---");
+    console.log("--- FINAL EXECUTED STEPS (Browser Workflow Audit Trail from flowManager.getSteps()) ---");
+    // This loop now provides a summary; detailed step-by-step is logged by the 'flowManagerStep' event.
     executedSteps.forEach((step, i) => {
-        const nodeString = typeof step.node === 'string' ? step.node : JSON.stringify(step.node);
-        console.log(`Step ${i}: Node: ${nodeString.substring(0,70)}${nodeString.length > 70 ? '...' : ''} -> Output Edges: ${step.output.edges}`);
-        if(step.subSteps) {
-            console.log(`    Contains ${step.subSteps.length} sub-steps.`);
+        const nodeString = typeof step.node === 'string' ? step.node :
+                           (typeof step.node === 'function' ? step.node.name || 'anonymous fn' : JSON.stringify(step.node));
+        let logMsg = `Step ${i} (Instance: ${flowManager.getInstanceId()}): Node: ${nodeString.substring(0,70)}${nodeString.length > 70 ? '...' : ''} -> Output Edges: ${step.output.edges}`;
+        if(step.subSteps && step.subSteps.length > 0) {
+            logMsg += ` (Contains ${step.subSteps.length} sub-steps)`;
         }
+        console.log(logMsg);
     });
     console.log("--- FINAL STATE (Browser Agent's Memory After Execution) ---");
     console.log(JSON.stringify(flowManager.getStateManager().getState(), null, 2));
@@ -729,14 +796,11 @@ function initializeBrowserMockResponder() {
         console.log(`%c[Browser Mock] Event: flowPaused`, 'color: blue; font-weight: bold;',
                     `Instance: ${flowInstanceId}, Pause ID: ${pauseId}, Details:`, details);
 
-        // Simulate UI interaction based on details.type using browser's prompt/confirm
         setTimeout(() => { // Simulate user taking some time to respond
             if (details.type === 'text_input') {
                 const response = prompt(`[Browser Mock for ${flowInstanceId} | ${pauseId}]\n${details.prompt}`, details.defaultValue || "");
                 GlobalPauseResumeManager.resume(pauseId, { text: response, respondedAt: new Date() });
             } else if (details.type === 'confirmation' && details.options && details.options.length >= 1) {
-                // Browser's confirm is binary (OK/Cancel).
-                // We use the first option for OK, second for Cancel if available, otherwise first for Cancel too.
                 const okOption = details.options[0];
                 const cancelOption = details.options.length > 1 ? details.options[1] : details.options[0];
 
@@ -750,7 +814,7 @@ function initializeBrowserMockResponder() {
                     console.log(`[Browser Mock] User chose not to resume pauseId ${pauseId} immediately. Manually resume via console: GlobalPauseResumeManager.resume('${pauseId}', { someData: 'your_data' })`);
                 }
             }
-        }, 500); // Simulate 0.5 second delay for user response
+        }, 500);
     });
 
     GlobalPauseResumeManager.addEventListener('flowResumed', (eventData) => {
@@ -768,98 +832,31 @@ function initializeBrowserMockResponder() {
 }
 
 
-// --- COMMENTED OUT: Node.js Specific CLI Responder Mock ---
+// --- COMMENTED OUT: Node.js Specific CLI Responder Mock (remains the same) ---
 /*
 const readline = require('readline'); // Only if actually running in Node and want interactive prompts
-
-function createMockCliResponder() {
-    const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-    });
-
-    function askQuestion(query, defaultValue) {
-        return new Promise(resolve => rl.question(`${query} ${defaultValue ? `(${defaultValue})` : ''}: `, answer => {
-            resolve(answer || defaultValue || '');
-        }));
-    }
-
-    async function handleFlowPaused(eventData) { // eventData is the { pauseId, details, flowInstanceId }
-        const { pauseId, details, flowInstanceId } = eventData;
-        console.log(`\n%c[CLI Responder] Event: flowPaused`, 'color: blue; font-weight: bold;',
-                    `Instance: ${flowInstanceId}, Pause ID: ${pauseId}`);
-        console.log(`%c[CLI Responder] Details:`, 'color: blue;', details);
-
-        if (details.type === 'text_input') {
-            const response = await askQuestion(`[CLI for ${flowInstanceId} | ${pauseId}] ${details.prompt}`, details.defaultValue);
-            GlobalPauseResumeManager.resume(pauseId, { text: response, respondedAt: new Date() });
-        } else if (details.type === 'confirmation' || (details.options && details.options.length > 0)) {
-            console.log(`[CLI for ${flowInstanceId} | ${pauseId}] ${details.message || details.prompt}`);
-            details.options.forEach((opt, i) => console.log(`  ${i + 1}. ${opt}`));
-            const choiceIndexStr = await askQuestion(`Enter your choice (number)`, '1');
-            const choiceIndex = parseInt(choiceIndexStr, 10) - 1;
-            let choice = details.options[0];
-            if (choiceIndex >= 0 && choiceIndex < details.options.length) {
-                choice = details.options[choiceIndex];
-            } else {
-                console.log(`[CLI Responder] Invalid choice, defaulting to '${choice}'.`);
-            }
-            GlobalPauseResumeManager.resume(pauseId, { choice: choice, decision: choice, confirmationTime: new Date(), payload: details.payload });
-        } else {
-            const genericResponse = await askQuestion(`[CLI for ${flowInstanceId} | ${pauseId}] Flow paused. Enter data to resume (JSON string or simple text)`, '{"acknowledged": true}');
-            let resumePayload;
-            try {
-                resumePayload = JSON.parse(genericResponse);
-            } catch (e) {
-                resumePayload = { text: genericResponse };
-            }
-            GlobalPauseResumeManager.resume(pauseId, { ...resumePayload, resumeTime: new Date() });
-        }
-    }
-    GlobalPauseResumeManager.addEventListener('flowPaused', handleFlowPaused);
-
-
-    GlobalPauseResumeManager.addEventListener('flowResumed', (eventData) => {
-        const { pauseId, resumeData, flowInstanceId } = eventData;
-        console.log(`\n%c[CLI Responder] Event: flowResumed`, 'color: green; font-weight: bold;',
-                    `Instance: ${flowInstanceId}, Pause ID: ${pauseId}, Resumed with:`, resumeData);
-    });
-
-    GlobalPauseResumeManager.addEventListener('resumeFailed', (eventData) => {
-        const { pauseId, reason } = eventData;
-        console.error(`\n%c[CLI Responder] Event: resumeFailed`, 'color: red; font-weight: bold;',
-                    `Pause ID: ${pauseId}, Reason: ${reason}`);
-    });
-
-    console.log('[CLI Responder] Initialized. Waiting for flow pause events...');
-}
+// ... (rest of createMockCliResponder function is unchanged) ...
 */
 
 // --- Run the Test (Browser Focus) ---
-
-// Check if we are in a browser environment.
-// `window` is a common check for browser.
 if (typeof window !== 'undefined' && typeof window.document !== 'undefined') {
     console.log("Running in Browser environment. Initializing Browser mock responder.");
     initializeBrowserMockResponder();
     runTestFlowBrowser();
 } else if (typeof process !== 'undefined' && process.versions && process.versions.node) {
     console.log("Running in Node.js environment. The Node.js CLI responder is currently commented out.");
-    console.log("To test Node.js HITL, uncomment the 'createMockCliResponder' section and its call.");
-    // To run the flow in Node.js without HITL, or if HITL is handled by another service:
-    // runTestFlowBrowser(); // This will run, HITL steps will pause indefinitely unless resumed programmatically.
-    console.log("Node.js flow execution without interactive HITL mock (unless resumed programmatically):");
-    // If you want to run the flow and have it pause, waiting for programmatic resume:
+    console.log("Node.js flow execution without interactive HITL mock (pauses will await programmatic resume):");
     GlobalPauseResumeManager.addEventListener('flowPaused', (eventData) => {
-         console.log(`NODE_SILENT_PAUSE: Flow ${eventData.flowInstanceId} paused. ID: ${eventData.pauseId}. Details: ${JSON.stringify(eventData.details)}`);
-         console.log(`To resume, call: GlobalPauseResumeManager.resume('${eventData.pauseId}', { your_data: 'value' })`);
+         console.log(`\nNODE_SILENT_PAUSE: Flow ${eventData.flowInstanceId} paused. ID: ${eventData.pauseId}.`);
+         console.log(`Details: ${JSON.stringify(eventData.details)}`);
+         console.log(`To resume, call from console: GlobalPauseResumeManager.resume('${eventData.pauseId}', { your_data: 'value' })`);
     });
-    runTestFlowBrowser(); // The flow itself is environment agnostic.
+    // If you want to test with the CLI responder in Node.js:
+    // 1. Uncomment the 'createMockCliResponder' function.
+    // 2. Call `createMockCliResponder();` here.
+    // 3. Remove or comment out the 'NODE_SILENT_PAUSE' listener above.
+    runTestFlowBrowser();
 } else {
-    console.log("Running in an unrecognized JavaScript environment.");
-    // Fallback or specific handling for other environments can be added here.
-    runTestFlowBrowser(); // Attempt to run the flow.
+    console.log("Running in an unrecognized JavaScript environment. Attempting to run test flow.");
+    runTestFlowBrowser();
 }
-
-// The `runTestFlowBrowser().finally(...)` block for Node.js readline management is removed
-// as the focus is now on browser testing, and readline management is commented out.s
