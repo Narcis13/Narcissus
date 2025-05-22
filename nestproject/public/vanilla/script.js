@@ -614,8 +614,9 @@ scope['Print elements'] = function(){
 
 scope['Loop Controller'] = function() {
   let count = this.state.get('loopCounter') || 0;
-  count++;
+ count++;
   this.state.set('loopCounter', count);
+   
   console.log(`[Scope:Loop Controller] Iteration: ${count}`);
   if (count >= 3) { // Loop 3 times (1, 2, 3)
     this.state.set('loopMessage', 'Loop finished by controller after 3 iterations');
@@ -715,21 +716,21 @@ async function runTestFlowBrowser() {
     nodes:[
       'Reset Counter',
       { 'Request User Input': { question: "Favorite color for browser test?", pauseId: "fav-color-query" } },
-      { 'received': ['print'] }, // Branch based on 'received' edge from previous step
+      { 'received': 'print' }, // Branch based on 'received' edge from previous step
       [['Loop Controller', // This is a loop node: [[controller, action1, action2, ...]]
-        'insideLoopPauseBrowser', // Action in the loop
+       // 'insideLoopPauseBrowser', // Action in the loop
        'Loop Action', // Another action in the loop
-       'print'        // Yet another action in the loop
+     // 'print'        // Yet another action in the loop
       ]], // End of loop node definition
       { // This is a branch node, reacting to the *final output* of the loop node above
-        'exit': [ 'print'], // 'exit' edge from Loop Controller
-        'exit_forced': ['print'], // 'exit_forced' edge from Loop Manager
+        'exit': {'Mesaj Intimpinare': {mesaj: 'Exit from loop', postfix:'!!'}}, // 'exit' edge from Loop Controller
+        'exit_forced': {'Mesaj Intimpinare': {mesaj: 'Forced Exit from loop', postfix:'!!'}}, // 'exit_forced' edge from Loop Manager
         // If the loop's last action emits 'approved_iteration_browser' or 'skipped_iteration_browser' and the loop *also* exits
         // (e.g., controller says 'exit' after the last action), then 'exit' takes precedence for branching *after* the loop.
         // If the loop *continues* after such an edge, that edge is internal to the loop's iteration.
         // For simplicity, we assume 'exit' or 'exit_forced' are the primary edges from the loop for post-loop branching.
         // A 'pass' edge can be a fallback if the loop structure is more complex.
-        'pass': [ 'print']
+        'pass': {'Mesaj Intimpinare': {mesaj: 'Pass Exit from loop', postfix:'!!'}}
       },
       'Async Task',
       'Check Async Result',
@@ -832,31 +833,5 @@ function initializeBrowserMockResponder() {
 }
 
 
-// --- COMMENTED OUT: Node.js Specific CLI Responder Mock (remains the same) ---
-/*
-const readline = require('readline'); // Only if actually running in Node and want interactive prompts
-// ... (rest of createMockCliResponder function is unchanged) ...
-*/
-
-// --- Run the Test (Browser Focus) ---
-if (typeof window !== 'undefined' && typeof window.document !== 'undefined') {
-    console.log("Running in Browser environment. Initializing Browser mock responder.");
     initializeBrowserMockResponder();
     runTestFlowBrowser();
-} else if (typeof process !== 'undefined' && process.versions && process.versions.node) {
-    console.log("Running in Node.js environment. The Node.js CLI responder is currently commented out.");
-    console.log("Node.js flow execution without interactive HITL mock (pauses will await programmatic resume):");
-    GlobalPauseResumeManager.addEventListener('flowPaused', (eventData) => {
-         console.log(`\nNODE_SILENT_PAUSE: Flow ${eventData.flowInstanceId} paused. ID: ${eventData.pauseId}.`);
-         console.log(`Details: ${JSON.stringify(eventData.details)}`);
-         console.log(`To resume, call from console: GlobalPauseResumeManager.resume('${eventData.pauseId}', { your_data: 'value' })`);
-    });
-    // If you want to test with the CLI responder in Node.js:
-    // 1. Uncomment the 'createMockCliResponder' function.
-    // 2. Call `createMockCliResponder();` here.
-    // 3. Remove or comment out the 'NODE_SILENT_PAUSE' listener above.
-    runTestFlowBrowser();
-} else {
-    console.log("Running in an unrecognized JavaScript environment. Attempting to run test flow.");
-    runTestFlowBrowser();
-}
