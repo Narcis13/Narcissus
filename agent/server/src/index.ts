@@ -3,7 +3,12 @@ import { logger } from 'hono/logger';
 import { prettyJSON } from 'hono/pretty-json';
 import { routes } from './routes';
 
+import { initializeServerNodeRegistry } from './config/initialize-nodes.server.js';
+//import { FlowManager } from '../../flow-engine/core/FlowManager.js'; // Assuming your FlowManager is here
+import { NodeRegistry } from '../../flow-engine/core/NodeRegistry.js'; // For direct use if needed
+    await initializeServerNodeRegistry();
 
+    console.log("All registered nodes:", NodeRegistry.getAll().map(n => n.id));
 // Create main Hono app
 const app = new Hono();
 
