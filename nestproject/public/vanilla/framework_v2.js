@@ -1,3 +1,4 @@
+//i have this framework for orchestrating complex agentic workflows suitable for AI workflows and automations: 
 /**
  * FlowHub: A singleton manager for handling pause and resume operations
  * across all FlowManager instances. It allows workflows to request human intervention
@@ -50,7 +51,7 @@ const FlowHub = (function() {
 
         /**
          * Adds an event listener for events.
-         * @param {string} eventName - Event to listen for ('flowPaused', 'flowResumed', 'resumeFailed', 'flowManagerStep', 'flowManagerNodeEvent').
+         * @param {string} eventName - Event to listen for ('flowPaused', 'flowResumed', 'resumeFailed', 'flowManagerStep').
          * @param {Function} callback - The function to call when the event occurs. The callback will receive the eventData object.
          */
         addEventListener(eventName, callback) {
@@ -166,10 +167,6 @@ function FlowManager({initialState, nodes, instanceId}={initialState:{}, nodes:[
 
   // No instance-specific event listeners here anymore. All events go through FlowHub.
 
-  // Stores listeners registered by nodes OF THIS INSTANCE on FlowHub, for cleanup.
-  // Each item: { hubEventName: string, effectiveHubCallback: Function }
-  const _registeredHubListeners = [];
-
   function StateManager(_initialState = {}) {
     const _currentState = JSON.parse(JSON.stringify(_initialState));
     const _history = [JSON.parse(JSON.stringify(_initialState))];
@@ -252,102 +249,6 @@ function FlowManager({initialState, nodes, instanceId}={initialState:{}, nodes:[
     };
   }
 
-  const baseExecutionContext = {
-      state: fmState,
-      // currentStep: steps.length, // steps array might not be fully updated for current node yet
-      steps, // Provides access to *previous* steps' history
-      nodes, // The full list of nodes for this FlowManager instance
-      // currentIndex, // The index of the *current* node being processed (1-based for user, 0-based internally)
-      // currentIndex and currentNode are accessed from FlowManager's lexical scope by emit/on
-      humanInput: async function(details, customPauseId) { // Added 'function' for explicit 'this' if it were ever unbound, though arrow function was fine here.
-          console.log(`[FlowManager:${flowInstanceId}] Node (idx: ${currentIndex-1}, in FM: ${flowInstanceId}) requests human input. Details:`, details, "Pause ID hint:", customPauseId);
-          const resumeData = await FlowHub.requestPause({
-              pauseId: customPauseId,
-              details,
-              flowInstanceId // This flowInstanceId is of the FM instance calling humanInput
-          });
-          console.log(`[FlowManager:${flowInstanceId}] Human input received:`, resumeData);
-          return resumeData;
-      },
-      /**
-       * Emits an event globally via FlowHub.
-       * @param {string} customEventName - The custom name of the event.
-       * @param {any} data - The payload for the event.
-       */
-      emit: async function(customEventName, data) { // 'this' is baseExecutionContext. Async for consistency.
-          const emittingNodeMeta = {
-              index: currentIndex - 1, // 0-based index of the emitting node within its FlowManager
-              definition: currentNode // Raw definition of the emitting node
-          };
-          // console.debug(`[FlowManager:${flowInstanceId}] Node (idx: ${emittingNodeMeta.index}) emitting event '${customEventName}' via FlowHub`, data);
-
-          FlowHub._emitEvent('flowManagerNodeEvent', {
-              flowInstanceId: flowInstanceId, // The FM instance ID of the EMITTER
-              emittingNode: {
-                  index: emittingNodeMeta.index,
-                  definition: JSON.parse(JSON.stringify(emittingNodeMeta.definition)) // Serializable definition
-              },
-              customEventName: customEventName,
-              eventData: data,
-              timestamp: Date.now()
-          });
-      },
-      /**
-       * Registers a listener on FlowHub for a custom node event.
-       * The listener will be automatically cleaned up when this FlowManager instance is re-run or disposed of (if such a method existed).
-       * @param {string} customEventName - The custom name of the event to listen for.
-       * @param {Function} nodeCallback - The function to call when the event occurs.
-       *                              It receives (data, meta) arguments.
-       *                              'this' inside the callback is the context of the listening node.
-       */
-      on: function(customEventName, nodeCallback) { // 'this' is baseExecutionContext of the node calling 'on'
-          if (typeof nodeCallback !== 'function') {
-              console.error(`[FlowManager:${flowInstanceId}] Node 'on' listener: callback must be a function for event '${customEventName}'.`);
-              return;
-          }
-          const listeningNodeContext = this; // 'this' is the baseExecutionContext of the FM instance where .on is called.
-          const listeningNodeMeta = {
-              index: currentIndex - 1, // Index of the listening node within its FlowManager
-              definition: currentNode, // Definition of the listening node
-              flowInstanceId: flowInstanceId // The FM instance ID where this listener is defined
-          };
-
-          const effectiveHubCallback = (flowHubEventData) => {
-              // flowHubEventData is what FlowHub broadcasts for 'flowManagerNodeEvent'
-              // It includes { flowInstanceId (emitter's FM), emittingNode, customEventName, eventData, timestamp }
-
-              if (flowHubEventData.customEventName === customEventName) {
-                  // Event name matches. Now invoke the node's original callback.
-                  const meta = {
-                      eventName: flowHubEventData.customEventName,
-                      emittingNodeMeta: { // Details of the node that EMITTED the event
-                          index: flowHubEventData.emittingNode.index,
-                          definition: flowHubEventData.emittingNode.definition, // This is already a copy from emit
-                          flowInstanceId: flowHubEventData.flowInstanceId // FM instance of the emitter
-                      },
-                      listeningNodeMeta: listeningNodeMeta // Details of THIS node that is LISTENING
-                  };
-                  try {
-                      // Call the original node's callback with its correct 'this' context (listeningNodeContext)
-                      nodeCallback.call(listeningNodeContext, flowHubEventData.eventData, meta);
-                  } catch (e) {
-                      console.error(`[FlowManager:${flowInstanceId}] Error in node event listener callback for '${customEventName}' (listener idx: ${listeningNodeMeta.index} in FM: ${listeningNodeMeta.flowInstanceId}):`, e);
-                  }
-              }
-          };
-
-          FlowHub.addEventListener('flowManagerNodeEvent', effectiveHubCallback);
-          _registeredHubListeners.push({
-              hubEventName: 'flowManagerNodeEvent', // The FlowHub event type we attached to
-              // originalCustomEventName: customEventName, // For debugging, if needed
-              // originalNodeCallback: nodeCallback, // For debugging, if needed
-              effectiveHubCallback: effectiveHubCallback // The actual function to remove
-          });
-          // console.debug(`[FlowManager:${flowInstanceId}] Node (idx: ${listeningNodeMeta.index}) registered FlowHub listener for custom event '${customEventName}'`);
-      }
-  };
-
-
   async function processReturnedValue(returnedValue, context) {
     let output = null;
     if (Array.isArray(returnedValue)) {
@@ -410,13 +311,12 @@ function FlowManager({initialState, nodes, instanceId}={initialState:{}, nodes:[
     while (iterationCount < maxIterations) {
       iterationCount++;
       const loopIterationInstanceId = `${flowInstanceId}-loop${iterationCount}`;
-      const controllerFM = FlowManager({ // This creates a new FlowManager instance for the controller
+      const controllerFM = FlowManager({
         initialState: fmState.getState(),
         nodes: [controllerNode],
         instanceId: `${loopIterationInstanceId}-ctrl`
       });
       // 'flowManagerStep' events from this sub-FM will be emitted to FlowHub
-      // Custom node events emitted from within controllerFM will also go through FlowHub
       const controllerRunResult = await controllerFM.run();
       let controllerOutput;
       if (controllerRunResult && controllerRunResult.length > 0) {
@@ -438,12 +338,11 @@ function FlowManager({initialState, nodes, instanceId}={initialState:{}, nodes:[
       if (controllerOutput.edges.includes('exit')) break; // Controller signals loop termination
 
       if (actionNodes.length > 0 && controllerOutput.edges.some(edge => edge !== 'exit' && edge !== 'exit_forced')) { // Only run actions if not exiting
-        const actionsFM = FlowManager({ // This creates a new FlowManager instance for actions
+        const actionsFM = FlowManager({
           initialState: fmState.getState(),
           nodes: actionNodes,
           instanceId: `${loopIterationInstanceId}-actions`
         });
-        // Custom node events emitted from within actionsFM will also go through FlowHub
         const actionsRunResult = await actionsFM.run();
         fmState.set(null, actionsFM.getStateManager().getState()); // Update parent state
         if (actionsRunResult && actionsRunResult.length > 0) {
@@ -472,10 +371,25 @@ function FlowManager({initialState, nodes, instanceId}={initialState:{}, nodes:[
     const nodeToRecord = node; // The original node definition
     let subStepsToRecord = null; // For sub-flows, loops, branches
 
-    // baseExecutionContext is now defined in the FlowManager scope and passed as 'this'
+    const baseExecutionContext = {
+        state: fmState,
+        // currentStep: steps.length, // steps array might not be fully updated for current node yet
+        steps, // Provides access to *previous* steps' history
+        nodes, // The full list of nodes for this FlowManager instance
+        currentIndex, // The index of the *current* node being processed (1-based for user, 0-based internally)
+        humanInput: async (details, customPauseId) => {
+            console.log(`[FlowManager:${flowInstanceId}] Node (or edge function) requests human input. Details:`, details, "Pause ID hint:", customPauseId);
+            const resumeData = await FlowHub.requestPause({
+                pauseId: customPauseId,
+                details,
+                flowInstanceId
+            });
+            console.log(`[FlowManager:${flowInstanceId}] Human input received:`, resumeData);
+            return resumeData;
+        }
+    };
 
     async function executeFunc(fn, context, ...args) {
-        // The 'context' here is baseExecutionContext
         return await Promise.resolve(fn.apply(context, args));
     }
 
@@ -490,11 +404,11 @@ function FlowManager({initialState, nodes, instanceId}={initialState:{}, nodes:[
       }
     } else if (Array.isArray(node)) {
       if (node.length === 1 && Array.isArray(node[0]) && node[0].length > 0) { // Loop construct: [[controller, ...actions]]
-        const loopRun = await loopManager(node[0]); // loopManager creates sub-FlowManager instances
+        const loopRun = await loopManager(node[0]);
         output = loopRun.finalOutput;
         subStepsToRecord = loopRun.internalSteps;
       } else if (node.length > 0) { // Subflow construct: [node1, node2, ...]
-        const subflowFM = FlowManager({ // Creates a sub-FlowManager instance
+        const subflowFM = FlowManager({
           initialState: fmState.getState(),
           nodes: node,
           instanceId: `${flowInstanceId}-subflow-idx${currentIndex-1}` // Subflow ID includes parent's current node index
@@ -522,7 +436,7 @@ function FlowManager({initialState, nodes, instanceId}={initialState:{}, nodes:[
           for (const edgeKey of Object.keys(node)) {
             if (prevEdges.includes(edgeKey)) {
               const branchNode = node[edgeKey];
-              const branchFM = FlowManager({ // Creates a sub-FlowManager instance for the branch
+              const branchFM = FlowManager({
                 initialState: fmState.getState(),
                 nodes: Array.isArray(branchNode) ? branchNode : [branchNode],
                 instanceId: `${flowInstanceId}-branch-${edgeKey}-idx${currentIndex-1}` // Branch ID includes edge and parent's index
@@ -580,13 +494,6 @@ function FlowManager({initialState, nodes, instanceId}={initialState:{}, nodes:[
     async run() {
       currentIndex = 0;
       steps.length = 0; // Clear steps for a fresh run
-
-      // Clean up listeners registered by THIS FlowManager instance on FlowHub from previous runs
-      _registeredHubListeners.forEach(listenerRegistration => {
-          FlowHub.removeEventListener(listenerRegistration.hubEventName, listenerRegistration.effectiveHubCallback);
-      });
-      _registeredHubListeners.length = 0; // Clear the array for this run
-
       return new Promise(async (resolve, reject) => {
         _resolveRunPromise = resolve; _rejectRunPromise = reject;
         if (!nodes || nodes.length === 0) {
@@ -653,9 +560,7 @@ scope['print'] = function(){
       name: this.state.get('name'),
       loopCounter: this.state.get('loopCounter'),
       lastUserInput: this.state.get('lastUserInput'),
-      rezultatAleator: this.state.get('rezultatAleator'),
-      eventListenerHeard: this.state.get('eventListenerHeard'), // For event test
-      emitterFired: this.state.get('emitterFired') // For event test
+      rezultatAleator: this.state.get('rezultatAleator')
   };
   console.log('[Scope:print] Random number:', Math.ceil(Math.random()*100), 'Partial State:', stateSnapshot);
   return { pass: () => true };
@@ -685,8 +590,8 @@ scope['Loop Controller'] = function() {
   this.state.set('loopCounter', count);
    
   console.log(`[Scope:Loop Controller] Iteration: ${count}`);
-  if (count > 2) { // Loop 2 times (1, 2) for quicker test
-    this.state.set('loopMessage', 'Loop finished by controller after 2 iterations');
+  if (count > 3) { // Loop 3 times (1, 2, 3)
+    this.state.set('loopMessage', 'Loop finished by controller after 3 iterations');
     return {
       exit: () => `Exited at iteration ${count}`
     };
@@ -707,8 +612,6 @@ scope['Reset Counter'] = function() {
   this.state.set('loopCounter', 0);
   this.state.set('loopMessage', null); // Clear previous loop messages
   this.state.set('actionDoneInLoop', null);
-  this.state.set('eventListenerHeard', null); // Clear for event test
-  this.state.set('emitterFired', null); // Clear for event test
   console.log('[Scope:Reset Counter] Counter reset to 0.');
   return "pass"; // Simple string return means { edges: ['pass'] }
 }
@@ -728,7 +631,7 @@ scope['Check Async Result'] = function() {
 
 scope['Request User Input'] = async function(params) {
   const question = params.question || "Please provide your input:";
-  console.log(`[Scope:Request User Input] Asking: "${question}" from FM ${this.state.getInstanceId ? this.state.getInstanceId() : 'N/A'}`); // this.state doesn't have getInstanceId
+  console.log(`[Scope:Request User Input] Asking: "${question}"`);
   const userInput = await this.humanInput(
     { type: 'text_input', prompt: question, defaultValue: params.default || "" },
     params.pauseId || `user-input-${this.state.get('name') || 'generic'}-${Date.now()%10000}` // More unique pauseId
@@ -775,82 +678,38 @@ scope['insideLoopPauseBrowser'] = async function() {
             this.state.set(`loopIter${loopCount}Approval`, 'Skipped');
             return "skipped_iteration_browser";
 }
-
-// New nodes for testing emit/on
-scope['Event Listener Node'] = function() {
-  // 'this' inside the callback will be the baseExecutionContext of this 'Event Listener Node'
-  // which belongs to the FlowManager instance where this node is defined.
-  this.on('customNodeEvent', function(data, meta) { // 'this' in the callback is correctly set by .call()
-    console.groupCollapsed(`%c[Scope:Event Listener Node Callback in FM: ${meta.listeningNodeMeta.flowInstanceId}] Received "${meta.eventName}"`, 'color: dodgerblue;');
-    console.log(`  My (listener) node index: ${meta.listeningNodeMeta.index} (FM: ${meta.listeningNodeMeta.flowInstanceId}), Def:`, meta.listeningNodeMeta.definition);
-    console.log(`  Emitter node index: ${meta.emittingNodeMeta.index} (FM: ${meta.emittingNodeMeta.flowInstanceId}), Def:`, meta.emittingNodeMeta.definition);
-    console.log('  Event Data:', data);
-    console.groupEnd();
-
-    let status = `Heard '${meta.eventName}' from node ${meta.emittingNodeMeta.index} in FM '${meta.emittingNodeMeta.flowInstanceId}'. My FM '${meta.listeningNodeMeta.flowInstanceId}', node idx ${meta.listeningNodeMeta.index}.`;
-    // Using 'this.state' to set state for the listening node
-    this.state.set('eventListenerHeard', {
-      receivedData: data,
-      message: status,
-      emitterFlowInstanceId: meta.emittingNodeMeta.flowInstanceId,
-      timestamp: new Date().toISOString()
-    });
-  });
-  console.log(`[Scope:Event Listener Node in FM: ${this.state.getInstanceId ? this.state.getInstanceId() : 'N/A'}] Registering listener for "customNodeEvent"`); // this.state does not have getInstanceId. flowInstanceId is in the parent scope.
-  return { pass: () => "Listener for 'customNodeEvent' registered." };
-};
-
-scope['Event Emitter Node'] = async function() { // Must be async if it uses await this.emit
-  const eventPayload = {
-    message: `Hello from Emitter Node in Loop! (Loop Iter: ${this.state.get('loopCounter') || 'N/A'})`,
-    timestamp: Date.now(),
-    currentLoopCounter: this.state.get('loopCounter') || 0,
-    someRandom: Math.random()
-  };
-  // console.log(`[Scope:Event Emitter Node in FM: ${flowInstanceId}] Emitting "customNodeEvent" with payload:`, eventPayload); // flowInstanceId not directly in this scope
-  console.log(`[Scope:Event Emitter Node] Emitting "customNodeEvent". My loopCounter: ${this.state.get('loopCounter')}. Payload:`, eventPayload.message);
-  await this.emit('customNodeEvent', eventPayload); // Use await as emit is async (though FlowHub._emitEvent is sync)
-  this.state.set('emitterFired', { emittedAt: new Date().toISOString(), payloadSummary: eventPayload.message });
-  return { pass: () => "Event 'customNodeEvent' emitted." };
-};
-
-
 // --- Test Flow Execution (Browser Focused) ---
 async function runTestFlowBrowser() {
   const flowManager = FlowManager({
     initialState:{
-      name: 'TestFlow_Browser_With_Hub_Events', // Updated name
+      name: 'TestFlow_Browser',
       a: 8, b: 5, d: { x: 111, y: 200 }, loopCounter: 0
     },
     nodes:[
       'Reset Counter',
-      'Event Listener Node', // Register listener in the main flow
       { 'Request User Input': { question: "Favorite color for browser test?", pauseId: "fav-color-query" } },
-      { // Branch node
-        'received': [ // Sub-flow executed if 'received' edge is output by 'Request User Input'
-            // 'Event Emitter Node', // Moved emitter inside loop for better subflow test
-            'print' // Print state to see results of event handling
-        ],
-        'pass': 'print' // Fallback if 'Request User Input' somehow doesn't emit 'received'
-      },
+      { 'received': 'print' }, // Branch based on 'received' edge from previous step
       [['Loop Controller', // This is a loop node: [[controller, action1, action2, ...]]
-        // Each iteration's actions run in a separate sub-FlowManager instance
-        'insideLoopPauseBrowser',
-        'Event Emitter Node', // Emit 'customNodeEvent' FROM WITHIN THE LOOP (sub-flow context)
-        'Loop Action',
+        'insideLoopPauseBrowser', // Action in the loop
+       'Loop Action', // Another action in the loop
+     // 'print'        // Yet another action in the loop
       ]], // End of loop node definition
-      'print', // Print after loop to see if listener in main flow heard events from loop
       { // This is a branch node, reacting to the *final output* of the loop node above
-        'exit': {'Mesaj Intimpinare': {mesaj: 'Exit from loop', postfix:'!!'}},
-        'exit_forced': {'Mesaj Intimpinare': {mesaj: 'Forced Exit from loop', postfix:'!!'}},
+        'exit': {'Mesaj Intimpinare': {mesaj: 'Exit from loop', postfix:'!!'}}, // 'exit' edge from Loop Controller
+        'exit_forced': {'Mesaj Intimpinare': {mesaj: 'Forced Exit from loop', postfix:'!!'}}, // 'exit_forced' edge from Loop Manager
+        // If the loop's last action emits 'approved_iteration_browser' or 'skipped_iteration_browser' and the loop *also* exits
+        // (e.g., controller says 'exit' after the last action), then 'exit' takes precedence for branching *after* the loop.
+        // If the loop *continues* after such an edge, that edge is internal to the loop's iteration.
+        // For simplicity, we assume 'exit' or 'exit_forced' are the primary edges from the loop for post-loop branching.
+        // A 'pass' edge can be a fallback if the loop structure is more complex.
         'pass': {'Mesaj Intimpinare': {mesaj: 'Pass Exit from loop', postfix:'!!'}}
       },
       'Async Task',
       'Check Async Result',
       { 'Confirm Action': { message: "Finalize this browser flow example?", actionId: "browser-flow-end" } },
       { // This is a branch node
-        'confirmed': [ 'print', {'Mesaj Intimpinare': {mesaj: 'Browser Flow Confirmed & Finalized', postfix:'!!'}} ],
-        'cancelled': [ 'print', {'Mesaj Intimpinare': {mesaj: 'Browser Flow Cancelled by User', postfix:'...'}} ]
+        'confirmed': [ 'print', {'Mesaj Intimpinare': {mesaj: 'Browser Flow Confirmed & Finalized', postfix:'!!'}} ], // Subflow
+        'cancelled': [ 'print', {'Mesaj Intimpinare': {mesaj: 'Browser Flow Cancelled by User', postfix:'...'}} ]  // Subflow
       },
     ]
   });
@@ -865,8 +724,8 @@ async function runTestFlowBrowser() {
         `%c[FlowTracer - ${eventData.flowInstanceId}] Step ${eventData.stepIndex}: ${nodeRepresentation.substring(0,70)}${nodeRepresentation.length > 70 ? '...' : ''}`,
         'color: purple; font-weight: normal;'
     );
-    // console.log(`  Flow Instance ID: ${eventData.flowInstanceId}`); // Already in group title
-    // console.log(`  Step Index: ${eventData.stepIndex}`); // Already in group title
+    console.log(`  Flow Instance ID: ${eventData.flowInstanceId}`);
+    console.log(`  Step Index: ${eventData.stepIndex}`);
     console.log(`  Node Definition:`, eventData.stepData.node);
     console.log(`  Output Edges:`, eventData.stepData.output.edges);
     if (eventData.stepData.output.results && eventData.stepData.output.results.length > 0) {
@@ -878,27 +737,6 @@ async function runTestFlowBrowser() {
     }
     // console.log(`  Current State (after step):`, eventData.currentState); // Can be very verbose
     console.groupEnd();
-  });
-
-  // Add listener for custom node events propagated to FlowHub
-  FlowHub.addEventListener('flowManagerNodeEvent', (eventData) => {
-      const emittingNodeDefString = typeof eventData.emittingNode.definition === 'string'
-          ? eventData.emittingNode.definition
-          : (typeof eventData.emittingNode.definition === 'function'
-              ? (eventData.emittingNode.definition.name || 'anonymous_fn')
-              : JSON.stringify(eventData.emittingNode.definition));
-
-      console.groupCollapsed(
-          `%c[FlowHub - NodeEvent] Emitted by FM: ${eventData.flowInstanceId}, Event: '${eventData.customEventName}' (from Node ${eventData.emittingNode.index}: ${emittingNodeDefString.substring(0,50)}${emittingNodeDefString.length > 50 ? '...' : ''})`,
-          'color: orange; font-weight: normal;'
-      );
-      // console.log(`  Emitter Flow Instance ID: ${eventData.flowInstanceId}`);
-      // console.log(`  Emitter Node Index: ${eventData.emittingNode.index}`);
-      // console.log(`  Emitter Node Definition:`, eventData.emittingNode.definition);
-      // console.log(`  Custom Event Name: '${eventData.customEventName}'`);
-      console.log(`  Event Data:`, eventData.eventData);
-      console.log(`  Timestamp: ${new Date(eventData.timestamp).toISOString()}`);
-      console.groupEnd();
   });
 
 
@@ -937,7 +775,7 @@ function initializeBrowserMockResponder() {
                 FlowHub.resume(pauseId, { text: response, respondedAt: new Date() });
             } else if (details.type === 'confirmation' && details.options && details.options.length >= 1) {
                 const okOption = details.options[0];
-                const cancelOption = details.options.length > 1 ? details.options[1] : "Cancel Default"; // Ensure cancelOption is defined
+                const cancelOption = details.options.length > 1 ? details.options[1] : details.options[0];
 
                 const userChoseOk = confirm(`[Browser Mock for ${flowInstanceId} | ${pauseId}]\n${details.message || details.prompt}\n\nOK = ${okOption}\nCancel = ${cancelOption}`);
                 const choice = userChoseOk ? okOption : cancelOption;
