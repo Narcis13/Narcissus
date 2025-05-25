@@ -1,12 +1,12 @@
 // src/boot/register-flow-nodes.client.js
 //import { boot } from 'quasar/wrappers'; // If using Quasar
 import { defineBoot } from '#q-app/wrappers'
-import { NodeRegistry } from 'src/flow-engine/core/NodeRegistry';
+import { NodeRegistry } from '../../../flow-engine/core/NodeRegistry'; 
 
 // Vite's import.meta.glob for dynamic imports
 // It finds all .node.js files recursively under src/flow-engine/nodes/
 // Using `eager: true` bundles them directly. For larger sets, consider non-eager and async loading.
-const nodeModules = import.meta.glob('../flow-engine/nodes/**/*.node.js', { eager: true });
+const nodeModules = import.meta.glob('../../../flow-engine/nodes/**/*.node.js', { eager: true });
 
 async function initializeClientNodeRegistry() {
     console.log('[NodeRegistryLoader-Client] Scanning for node modules...');

@@ -139,3 +139,5 @@ const FlowHub = (function() {
         }
     };
 })();
+
+export default FlowHub;

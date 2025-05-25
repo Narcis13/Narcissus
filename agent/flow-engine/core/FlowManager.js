@@ -1,3 +1,5 @@
+import FlowHub from './FlowHub.js';
+
 /**
  * FlowManager: A powerful and flexible engine for orchestrating complex workflows,
  * particularly well-suited for AI agentic systems. It allows workflows to be defined
@@ -12,7 +14,7 @@
  * @param {string} [config.instanceId] - An optional ID for this FlowManager instance.
  * @returns {object} An API to run and interact with the flow.
  */
-function FlowManager({initialState, nodes, instanceId}={initialState:{}, nodes:[], instanceId: undefined}) {
+export function FlowManager({initialState, nodes, instanceId}={initialState:{}, nodes:[], instanceId: undefined}) {
   const steps = [];
   let currentNode = null;
   let currentIndex = 0;
