@@ -12,12 +12,19 @@ import { NodeRegistry } from '../../flow-engine/core/NodeRegistry.js'; // For di
 
     // Example: Run a simple flow
     console.log("\n--- Running Example Flow ---");
+    const scope = NodeRegistry.getScope();
+    scope['Test something']= function() {
+        console.log("Test something called!");
+        return "tested";
+    };
+
     const fm = FlowManager({
         initialState: { myText: "This is great!" },
         nodes: [
+          'Test something', // Custom node
             { // Call registered node
-              "text.analysis.sentiment": {
-                "text": "$.state.myText"
+              "Sentiment Analyzer": {
+                "text": "Uraaaa!",
               }
             },
             { // Branch based on previous output
@@ -25,13 +32,14 @@ import { NodeRegistry } from '../../flow-engine/core/NodeRegistry.js'; // For di
               "negative": { "utils.debug.logMessage": { "message": "Sentiment was negative!", "level": "warn" } },
               "neutral":  { "utils.debug.logMessage": { "message": "Sentiment was neutral." } }
             }
-        ]
+        ],
+        scope
     });
 
     try {
-       // const result = await fm.run();     //COMINg SOON!!!!!!
+        const result = await fm.run();     //COMINg SOON!!!!!!
         console.log("Flow completed. Final state:", fm.getStateManager().getState());
-        // console.log("Flow steps:", result);   
+      //   console.log("Flow steps:", result);   
     } catch (e) {
         console.error("Flow execution error:", e);
     }

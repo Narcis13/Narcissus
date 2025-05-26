@@ -46,7 +46,7 @@ export const NodeRegistry = {
         if (text) {
             const lowerText = text.toLowerCase();
             results = results.filter(node =>
-                node.name.toLowerCase().includes(lowerText) ||
+                (node.name && node.name.toLowerCase().includes(lowerText)) || // Added check for node.name existence
                 node.description.toLowerCase().includes(lowerText) ||
                 (node.tags && node.tags.some(tag => tag.toLowerCase().includes(lowerText))) ||
                 (node.aiPromptHints && (
@@ -86,5 +86,29 @@ export const NodeRegistry = {
      */
     getAll() {
         return Array.from(_nodes.values());
+    },
+
+    /**
+     * Retrieves a scope object containing full node definitions, keyed by "id:name".
+     * The keys are in the format "node.id:node.name" (e.g., "text.transform.toUpperCase:Convert to Uppercase").
+     * The values are the full node definition objects.
+     * This scope can be augmented and then used by FlowManager (e.g., by assigning to globalThis.scope)
+     * to execute nodes.
+     * @returns {Object.<string, import('../types/flow-types.jsdoc.js').NodeDefinition>} 
+     *          An object mapping "id:name" strings to their full node definitions.
+     *          User-added functions will be directly functions, not NodeDefinition objects.
+     */
+    getScope() {
+        const scopeObject = {};
+        for (const [nodeId, nodeDefinition] of _nodes) {
+            // Ensure essential properties for forming the key and for the definition to be useful
+            if (nodeDefinition && nodeDefinition.id && nodeDefinition.name && typeof nodeDefinition.implementation === 'function') {
+                const qualifiedKey = `${nodeDefinition.id}:${nodeDefinition.name}`;
+                scopeObject[qualifiedKey] = nodeDefinition; // Store the whole definition
+            } else {
+                console.warn(`[NodeRegistry.getScope] Skipping node due to missing id, name, or implementation:`, nodeDefinition.id || nodeDefinition);
+            }
+        }
+        return scopeObject;
     }
 };
