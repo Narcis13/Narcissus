@@ -635,8 +635,16 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
             id: nodeToEvaluate, 
             name: nodeToEvaluate, 
             description: "An identifier for a node or function that could not be fully resolved from scope for the 'self' context.",
+            source:scope[nodeToEvaluate] ? scope[nodeToEvaluate].toString() : '',
             _unresolvedIdentifier: true 
-          };
+          } 
+        } else {
+             nodeDefinitionForSelfContext = {   
+                     id: nodeToEvaluate, 
+                      name: nodeToEvaluate, 
+                      description: "An identifier for a node or function that could not be fully resolved from scope for the 'self' context.",
+                      source:scope[nodeToEvaluate] ? scope[nodeToEvaluate].toString() : ''
+                    }
         }
       } else if (typeof nodeToEvaluate === 'function') {
         // For a direct function in the nodes array, `self` is a synthetic definition.
@@ -644,13 +652,76 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
           id: `workflow-function-${currentIndex}`, 
           name: `Workflow-Defined Function @ index ${currentIndex}`,
           description: 'A function provided directly within the workflow nodes definition.',
+          source: nodeToEvaluate.toString(), // Store the function source code for reference
           _isWorkflowProvidedFunction: true 
         };
+      } else if (typeof nodeToEvaluate === 'object' && nodeToEvaluate !== null && !Array.isArray(nodeToEvaluate)) {
+        // OBJECT CASE: Could be a parameterized call, a branch structure, or an empty object.
+        const keys = Object.keys(nodeToEvaluate);
+
+        if (keys.length === 1) {
+          const nodeIdentifier = keys[0];
+          const nodeParams = nodeToEvaluate[nodeIdentifier];
+          
+          // Attempt to resolve the key as a function to see if it's a callable node.
+          const implementation = resolveNodeFromScope(nodeIdentifier);
+
+          // Check if the structure matches a parameterized call:
+          // - An implementation function must exist for the identifier.
+          // - The value associated with the identifier (nodeParams) must be an object (but not an array) or undefined.
+          const isParameterizedCallStructure = implementation &&
+                                               ((typeof nodeParams === 'object' && !Array.isArray(nodeParams) && nodeParams !== null) || nodeParams === undefined);
+
+          if (isParameterizedCallStructure) {
+            // This node is a parameterized function call.
+            // Construct 'self' with details about the function being called.
+            const selfDefCandidate = findNodeDefinitionInScope(nodeIdentifier);
+
+            if (selfDefCandidate && typeof selfDefCandidate === 'object' && !selfDefCandidate._unresolvedIdentifier) {
+                // A definition (full NodeDefinition or synthetic for a scope function) was found.
+                // Use it as the base for 'self'.
+                nodeDefinitionForSelfContext = {
+                    ...selfDefCandidate, // Spread the properties of the found definition
+                    description: selfDefCandidate.description || `A parameterized call to '${nodeIdentifier}'.`, // Ensure description exists
+                    source: implementation.toString(), // Actual source code of the implementation
+                    parametersProvided: nodeParams,    // Parameters passed in the workflow
+                    _isParameterizedCall: true         // Flag indicating this type of 'self'
+                    // _isScopeProvidedFunction will be preserved if selfDefCandidate had it.
+                };
+            } else {
+                 // Fallback: Implementation was found, but findNodeDefinitionInScope didn't return a rich/resolved object.
+                 // Create a more basic synthetic 'self'.
+                 nodeDefinitionForSelfContext = {
+                    id: nodeIdentifier,
+                    name: nodeIdentifier, // Default name to the identifier
+                    description: `A parameterized call to the function '${nodeIdentifier}'.`,
+                    source: implementation.toString(),
+                    parametersProvided: nodeParams,
+                    _isParameterizedCall: true
+                };
+            }
+          } else {
+            // Not a parameterized call (e.g., implementation not found for the key,
+            // or the value 'nodeParams' is an array, suggesting a branch).
+            // 'self' is the object structure itself (e.g., for a branch).
+            nodeDefinitionForSelfContext = nodeToEvaluate;
+          }
+        } else {
+          // Object with multiple keys (likely a branch) or an empty object (pass-through).
+          // 'self' is the object structure itself.
+          nodeDefinitionForSelfContext = nodeToEvaluate;
+        }
+      } else if (Array.isArray(nodeToEvaluate)) {
+        // ARRAY CASE: This is a sub-flow or a loop construct.
+        // 'self' is the array structure itself as defined in the workflow.
+        nodeDefinitionForSelfContext = nodeToEvaluate;
       } else {
-        // For arrays (sub-flows, loops) and objects (branches, parameterized calls),
-        // `self` is the structure itself as defined in the workflow.
+        // FALLBACK: For any other unexpected node types.
+        console.warn(`[FlowManager:${flowInstanceId}] Unhandled node type for 'self' context construction:`, nodeToEvaluate);
+        // Default to setting 'self' as the node itself, though its handling might be undefined.
         nodeDefinitionForSelfContext = nodeToEvaluate;
       }
+
       baseExecutionContext.self = nodeDefinitionForSelfContext;
       
       // Increment `currentIndex` *before* calling `evaluateNode` for the current node.
