@@ -36,6 +36,7 @@ export default {
     implementation: async function(params) {
         // 'this' provides: this.state, this.humanInput, this.emit, this.on
         // In a real scenario, this would call an NLP library or API
+        console.log("Analyzing sentiment for text:", params.text,this.self,this.input);
         const text = String(params.text || "").toLowerCase();
         if (text.includes("error")) return { error: () => "Simulated analysis error." };
 

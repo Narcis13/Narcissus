@@ -13,8 +13,12 @@ onMounted(async () => {
     console.log("\n--- Running Example Flow ---");
     const scope = NodeRegistry.getScope();
     scope['Test something'] = function() {
-        console.log("Test something called!");
-        return "tested";
+        console.log("Test something called!",this.self);
+        return {
+            "text": ()=> {
+                return "This is a test text for sentiment analysis.";
+            }
+        };
     };
 
     const fm = FlowManager({
