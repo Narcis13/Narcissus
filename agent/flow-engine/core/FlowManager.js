@@ -36,9 +36,22 @@ import FlowHub from './FlowHub.js';
  * @param {Array} [config.nodes=[]] - An array defining the workflow's structure.
  * @param {string} [config.instanceId] - An optional ID for this FlowManager instance.
  * @param {object} [config.scope={}] - The scope object containing node implementations (functions or NodeDefinition objects).
+ * @param {any} [config.initialInput=null] - The initial input for the first node in the flow.
  * @returns {object} An API to run and interact with the flow.
  */
-export function FlowManager({initialState, nodes, instanceId, scope: providedScope}={initialState:{}, nodes:[], instanceId: undefined, scope: {}}) {
+export function FlowManager({
+    initialState,
+    nodes,
+    instanceId,
+    scope: providedScope,
+    initialInput = null // <<< ADDED initialInput parameter
+} = {
+    initialState: {},
+    nodes: [],
+    instanceId: undefined,
+    scope: {}, // This default applies if the whole config object is missing
+    initialInput: null // <<< ADDED default for destructuring
+}) {
   const steps = [];
   let currentNode = null; // Represents the node definition *currently being executed or focused on* by the engine. Used by emit/on.
   let currentIndex = 0; // Index for iterating through the `nodes` array of this FlowManager instance.
@@ -47,7 +60,8 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
   let _resolveRunPromise = null;
   let _rejectRunPromise = null;
   
-  const scope = providedScope; 
+  const scope = providedScope || {}; // <<< MODIFIED: Ensure scope is always an object
+  const _initialInput = initialInput; // <<< ADDED: Store initialInput for use later
 
   const _registeredHubListeners = [];
 
@@ -63,52 +77,55 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
 
     return {
       get(path) {
-        if (!path) return '';
+        if (!path) return undefined; // MODIFIED: Or perhaps return undefined/null for consistency if path is empty
         const keys = path.split('.');
         let result = _currentState;
         for (const key of keys) {
           if (result === undefined || result === null || !Object.prototype.hasOwnProperty.call(result, key)) {
-            return '';
+            return undefined; // <<< MODIFIED: Return undefined if path not fully resolved
           }
           result = result[key];
         }
-        return result !== undefined && result !== null ? result : '';
+        return result; // <<< MODIFIED: Return the actual stored value (could be null, undefined, '', etc.)
       },
       set(path, value) {
-        let targetStateObject = _currentState;
+        let targetObjectForReturn; // What the 'set' operation effectively targeted
+
         if (path === null || path === '') {
-          const newStateParsed = JSON.parse(JSON.stringify(value));
-          for (const key in _currentState) {
-            if (Object.prototype.hasOwnProperty.call(_currentState, key)) {
-              delete _currentState[key];
-            }
-          }
-          for (const key in newStateParsed) {
-            if (Object.prototype.hasOwnProperty.call(newStateParsed, key)) {
-              _currentState[key] = newStateParsed[key];
-            }
-          }
+            // The intention is to replace the entire state.
+            // _currentState should become a deep copy of 'value'.
+            const newFullState = JSON.parse(JSON.stringify(value));
+            
+            // Clear out the old _currentState properties
+            Object.keys(_currentState).forEach(key => delete _currentState[key]);
+            // Assign new properties from newFullState to _currentState
+            Object.assign(_currentState, newFullState);
+            targetObjectForReturn = _currentState;
         } else {
-          const newStateCopy = JSON.parse(JSON.stringify(_currentState));
-          let current = newStateCopy;
-          const keys = path.split('.');
-          for (let i = 0; i < keys.length - 1; i++) {
-            const key = keys[i];
-            if (!current[key] || typeof current[key] !== 'object') {
-              current[key] = {};
+            // Setting a specific path
+            const keys = path.split('.');
+            let current = _currentState; // Work directly on _currentState for path setting
+
+            for (let i = 0; i < keys.length - 1; i++) {
+                const key = keys[i];
+                if (!current[key] || typeof current[key] !== 'object') {
+                    current[key] = {}; // Create structure if it doesn't exist
+                }
+                current = current[key];
             }
-            current = current[key];
-          }
-          const lastKey = keys[keys.length - 1];
-          current[lastKey] = value;
-          Object.assign(_currentState, newStateCopy);
-          targetStateObject = current[lastKey];
+            const lastKey = keys[keys.length - 1];
+            current[lastKey] = JSON.parse(JSON.stringify(value)); // Ensure deep copy of value being set
+            targetObjectForReturn = current[lastKey];
         }
+
+        // Add a new history entry: a deep copy of the modified _currentState
         _history.splice(_historyCurrentIndex + 1);
         _history.push(JSON.parse(JSON.stringify(_currentState)));
         _historyCurrentIndex = _history.length - 1;
-        return targetStateObject;
+
+        return JSON.parse(JSON.stringify(targetObjectForReturn)); // Return a deep copy of what was set
       },
+
       getState() { return JSON.parse(JSON.stringify(_currentState)); },
       canUndo() { return _historyCurrentIndex > 0; },
       canRedo() { return _historyCurrentIndex < _history.length - 1; },
@@ -147,8 +164,8 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
    */
   const baseExecutionContext = {
       state: fmState,
-      steps, 
-      nodes, 
+      steps,
+      nodes,
       self: null, // Dynamically set in _nextStepInternal before each node execution
       input: null, // Dynamically set in _nextStepInternal before each node execution
       flowInstanceId: flowInstanceId, // Set once for the FlowManager instance
@@ -177,14 +194,14 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
        */
       emit: async function(customEventName, data) {
           const emittingNodeMeta = {
-              index: currentIndex - 1, 
-              definition: currentNode 
+              index: currentIndex - 1,
+              definition: currentNode
           };
           FlowHub._emitEvent('flowManagerNodeEvent', {
-              flowInstanceId: this.flowInstanceId, 
+              flowInstanceId: this.flowInstanceId,
               emittingNode: {
                   index: emittingNodeMeta.index,
-                  definition: JSON.parse(JSON.stringify(emittingNodeMeta.definition)) 
+                  definition: JSON.parse(JSON.stringify(emittingNodeMeta.definition))
               },
               customEventName: customEventName,
               eventData: data,
@@ -198,18 +215,26 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
        * @param {string} customEventName - The custom name of the event to listen for.
        * @param {Function} nodeCallback - The function to call when the event occurs.
        *                              It receives (data, meta) arguments.
-       *                              'this' inside the callback is the `baseExecutionContext` of the listening node.
+       *                              'this' inside the callback is the `baseExecutionContext` of the listening node,
+       *                              with 'self' and 'input' captured at the time of listener registration.
        */
       on: function(customEventName, nodeCallback) {
           if (typeof nodeCallback !== 'function') {
               console.error(`[FlowManager:${this.flowInstanceId}] Node 'on' listener: callback must be a function for event '${customEventName}'.`);
               return;
           }
-          const listeningNodeContext = this; 
+
+          // Capture critical parts of the context AT THE TIME OF LISTENER REGISTRATION
+          const capturedSelf = JSON.parse(JSON.stringify(this.self));
+          const capturedInput = (typeof this.input === 'object' && this.input !== null)
+                                ? JSON.parse(JSON.stringify(this.input))
+                                : this.input;
+          const originalFlowManagerContext = this; // For calling .state, .emit, .humanInput etc.
+
           const listeningNodeMeta = {
-              index: currentIndex - 1, 
-              definition: currentNode, 
-              flowInstanceId: this.flowInstanceId 
+              index: currentIndex - 1,
+              definition: capturedSelf, // Use the captured definition for meta consistency
+              flowInstanceId: this.flowInstanceId
           };
 
           const effectiveHubCallback = (flowHubEventData) => {
@@ -223,8 +248,15 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
                       },
                       listeningNodeMeta: listeningNodeMeta
                   };
+
+                  // Construct a 'this' for the callback that uses captured self/input,
+                  // but delegates other properties/methods to the original context.
+                  const callbackThisContext = Object.create(originalFlowManagerContext);
+                  callbackThisContext.self = capturedSelf;
+                  callbackThisContext.input = capturedInput;
+
                   try {
-                      nodeCallback.call(listeningNodeContext, flowHubEventData.eventData, meta);
+                      nodeCallback.call(callbackThisContext, flowHubEventData.eventData, meta);
                   } catch (e) {
                       console.error(`[FlowManager:${this.flowInstanceId}] Error in node event listener callback for '${customEventName}' (listener idx: ${listeningNodeMeta.index} in FM: ${listeningNodeMeta.flowInstanceId}):`, e);
                   }
@@ -280,7 +312,7 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
         }
       }
     }
-    
+
     // Case 4: Direct match was a simple function (user-added function to scope)
     // Create a synthetic definition for `this.self`.
     if (directMatch && typeof directMatch === 'function') {
@@ -290,10 +322,10 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
             description: 'A custom function provided directly in the FlowManager scope.',
             // The actual implementation is resolved separately by `resolveNodeFromScope`.
             // `self` is primarily metadata.
-            _isScopeProvidedFunction: true 
+            _isScopeProvidedFunction: true
         };
     }
-    
+
     // If not found as a full NodeDefinition or a direct function in scope
     return null;
   }
@@ -368,7 +400,7 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
           try {
             const edgeFn = edgeFunctions[k];
             // Pass the full context to edge functions, allowing them to use this.state, this.input etc.
-            let result = await Promise.resolve(edgeFn.apply(context, [])); 
+            let result = await Promise.resolve(edgeFn.apply(context, []));
             results.push(result);
           } catch (e) {
             console.error(`[FlowManager:${flowInstanceId}] Error executing edge function for '${k}':`, e);
@@ -383,7 +415,7 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
         output = { edges: ['pass'], results: [returnedValue] };
       }
     } else if (typeof returnedValue === 'string') {
-      output = { edges: [returnedValue] };
+      output = { edges: [returnedValue], results: [returnedValue] }; // <<< MODIFIED to include results
     } else {
       output = { edges: ['pass'], results: [returnedValue] };
     }
@@ -395,12 +427,12 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
   }
 
   /**
-   * Manages the execution of a loop construct within the flow. 
-   * (Original logic remains unchanged; sub-FMs will get their own `self` and `input` context).
+   * Manages the execution of a loop construct within the flow.
    * @param {Array} loopNodesConfig - The array defining the loop's controller and actions.
+   * @param {any} loopInitialInput - The input to the loop construct for the first iteration.
    * @returns {Promise<object>} A promise resolving to { internalSteps: Array, finalOutput: object }.
    */
-  async function loopManager(loopNodesConfig) {
+  async function loopManager(loopNodesConfig, loopInitialInput) { // <<< ADDED loopInitialInput
     const loopInternalSteps = [];
     if (!loopNodesConfig || loopNodesConfig.length === 0) {
       const passOutput = { edges: ['pass'] };
@@ -408,27 +440,28 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
     }
     const controllerNode = loopNodesConfig[0];
     const actionNodes = loopNodesConfig.slice(1);
-    let maxIterations = 100; 
+    let maxIterations = 100;
     let iterationCount = 0;
-    let lastLoopIterationOutput = { edges: ['pass'] }; 
+    let lastLoopIterationOutput = { edges: ['pass'] };
 
     while (iterationCount < maxIterations) {
       iterationCount++;
       const loopIterationInstanceId = `${flowInstanceId}-loop${iterationCount}`;
-      
+
       const controllerFM = FlowManager({
-        initialState: fmState.getState(), 
+        initialState: fmState.getState(),
         nodes: [controllerNode],
         instanceId: `${loopIterationInstanceId}-ctrl`,
-        scope: scope 
+        scope: scope,
+        initialInput: (iterationCount === 1) ? loopInitialInput : (lastLoopIterationOutput?.results ? lastLoopIterationOutput.results[0] : null) // <<< MODIFIED to use loopInitialInput
       });
-      
+
       const controllerRunResult = await controllerFM.run();
       let controllerOutput;
 
       if (controllerRunResult && controllerRunResult.length > 0) {
         controllerOutput = controllerRunResult.at(-1).output;
-        fmState.set(null, controllerFM.getStateManager().getState()); 
+        fmState.set(null, controllerFM.getStateManager().getState());
         loopInternalSteps.push({
           nodeDetail: `Loop Iter ${iterationCount}: Controller ${typeof controllerNode === 'string' ? controllerNode : 'Complex Controller'}`,
           outputFromController: controllerOutput,
@@ -436,31 +469,32 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
         });
       } else {
         console.warn(`[FlowManager:${flowInstanceId}] Loop controller (iter ${iterationCount}) did not produce output. Defaulting to 'exit'.`);
-        controllerOutput = { edges: ['exit'] }; 
+        controllerOutput = { edges: ['exit'] };
         loopInternalSteps.push({
           nodeDetail: `Loop Iter ${iterationCount}: Controller Error or No Output`, outputFromController: controllerOutput,
         });
       }
-      
-      lastLoopIterationOutput = controllerOutput; 
+
+      lastLoopIterationOutput = controllerOutput;
 
       if (controllerOutput.edges.includes('exit') || controllerOutput.edges.includes('exit_forced')) {
-        break; 
+        break;
       }
 
       if (actionNodes.length > 0) {
         const actionsFM = FlowManager({
-          initialState: fmState.getState(), 
+          initialState: fmState.getState(),
           nodes: actionNodes,
           instanceId: `${loopIterationInstanceId}-actions`,
-          scope: scope 
+          scope: scope,
+          initialInput: (controllerOutput?.results && controllerOutput.results.length > 0) ? controllerOutput.results[0] : null // <<< ADDED initialInput for actions
         });
-        
+
         const actionsRunResult = await actionsFM.run();
-        fmState.set(null, actionsFM.getStateManager().getState()); 
+        fmState.set(null, actionsFM.getStateManager().getState());
 
         if (actionsRunResult && actionsRunResult.length > 0) {
-          lastLoopIterationOutput = actionsRunResult.at(-1).output; 
+          lastLoopIterationOutput = actionsRunResult.at(-1).output;
           loopInternalSteps.push({
             nodeDetail: `Loop Iter ${iterationCount}: Actions`, outputFromActions: lastLoopIterationOutput, actionSubSteps: actionsRunResult
           });
@@ -471,7 +505,7 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
 
       if (iterationCount >= maxIterations) {
         console.warn(`[FlowManager:${flowInstanceId}] Loop reached max iterations (${maxIterations}). Forcing exit.`);
-        lastLoopIterationOutput = { edges: ['exit_forced'] }; 
+        lastLoopIterationOutput = { edges: ['exit_forced'] };
         loopInternalSteps.push({ nodeDetail: "Loop Max Iterations Reached", output: lastLoopIterationOutput });
         break;
       }
@@ -490,8 +524,8 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
   async function evaluateNode(nodeDefinitionFromWorkflow) {
     let output = null;
     let returnedValue;
-    const nodeToRecord = nodeDefinitionFromWorkflow; 
-    let subStepsToRecord = null; 
+    const nodeToRecord = nodeDefinitionFromWorkflow;
+    let subStepsToRecord = null;
 
     // Helper to execute a node's implementation function with the correct context and arguments.
     // `baseExecutionContext` is used as `this`, so it has `self`, `input`, `state`, etc.
@@ -512,7 +546,7 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
     } else if (Array.isArray(nodeDefinitionFromWorkflow)) {
       if (nodeDefinitionFromWorkflow.length === 1 && Array.isArray(nodeDefinitionFromWorkflow[0]) && nodeDefinitionFromWorkflow[0].length > 0) {
         // Loop construct: [[controller, ...actions]]
-        const loopRun = await loopManager(nodeDefinitionFromWorkflow[0]);
+        const loopRun = await loopManager(nodeDefinitionFromWorkflow[0], baseExecutionContext.input); // <<< PASSED input to loopManager
         output = loopRun.finalOutput;
         subStepsToRecord = loopRun.internalSteps;
       } else if (nodeDefinitionFromWorkflow.length > 0) {
@@ -521,12 +555,13 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
         const subflowFM = FlowManager({
           initialState: fmState.getState(),
           nodes: nodeDefinitionFromWorkflow,
-          instanceId: `${flowInstanceId}-subflow-idx${currentIndex-1}`, 
-          scope: scope
+          instanceId: `${flowInstanceId}-subflow-idx${currentIndex-1}`,
+          scope: scope,
+          initialInput: baseExecutionContext.input // <<< ADDED: Pass current input as initial for sub-flow
         });
         const subflowResultSteps = await subflowFM.run();
-        fmState.set(null, subflowFM.getStateManager().getState()); 
-        output = subflowResultSteps?.at(-1)?.output || { edges: ['pass'] }; 
+        fmState.set(null, subflowFM.getStateManager().getState());
+        output = subflowResultSteps?.at(-1)?.output || { edges: ['pass'] };
         subStepsToRecord = subflowResultSteps;
       } else {
         // Empty array as a node: considered a pass-through
@@ -537,39 +572,40 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
         // Empty object as a node: considered a pass-through
         output = { edges: ['pass'] };
       } else {
-        const nodeKey = Object.keys(nodeDefinitionFromWorkflow)[0]; 
+        const nodeKey = Object.keys(nodeDefinitionFromWorkflow)[0];
         const nodeValue = nodeDefinitionFromWorkflow[nodeKey];
-        
+
         const implementation = resolveNodeFromScope(nodeKey);
 
         if (implementation && Object.keys(nodeDefinitionFromWorkflow).length === 1 && ( (typeof nodeValue === 'object' && !Array.isArray(nodeValue)) || nodeValue === undefined) ) {
           // Case 1: Parameterized function call: { "nodeNameOrId": {param1: value1, ...} }
-          returnedValue = await executeFunc(implementation, baseExecutionContext, nodeValue || {}); 
+          returnedValue = await executeFunc(implementation, baseExecutionContext, nodeValue || {});
         } else {
           // Case 2: Branching construct: { "edgeName1": nodeA, "edgeName2": nodeB, ... }
           const prevStepOutput = steps.at(-1)?.output; // Output of the node *before this branch object* in the current flow
           const prevEdges = (prevStepOutput && prevStepOutput.edges) ? prevStepOutput.edges : [];
           let branchTaken = false;
 
-          for (const edgeKey of Object.keys(nodeDefinitionFromWorkflow)) { 
+          for (const edgeKey of Object.keys(nodeDefinitionFromWorkflow)) {
             if (prevEdges.includes(edgeKey)) {
               const branchNodeDefinition = nodeDefinitionFromWorkflow[edgeKey];
               const branchFM = FlowManager({
                 initialState: fmState.getState(),
-                nodes: Array.isArray(branchNodeDefinition) ? branchNodeDefinition : [branchNodeDefinition], 
+                nodes: Array.isArray(branchNodeDefinition) ? branchNodeDefinition : [branchNodeDefinition],
                 instanceId: `${flowInstanceId}-branch-${edgeKey}-idx${currentIndex-1}`,
-                scope: scope 
+                scope: scope,
+                initialInput: baseExecutionContext.input // <<< ADDED: Pass current input (from node before branch)
               });
               const branchResultSteps = await branchFM.run();
-              fmState.set(null, branchFM.getStateManager().getState()); 
+              fmState.set(null, branchFM.getStateManager().getState());
               output = branchResultSteps?.at(-1)?.output || { edges: ['pass'] };
               subStepsToRecord = branchResultSteps;
               branchTaken = true;
-              break; 
+              break;
             }
           }
           if (!branchTaken) {
-            output = { edges: ['pass'] }; 
+            output = { edges: ['pass'] };
           }
         }
       }
@@ -585,14 +621,14 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
     if (!output || typeof output.edges === 'undefined' || !Array.isArray(output.edges) || output.edges.length === 0) {
       output = { ...(output || {}), edges: ['pass'] };
     }
-    
+
     steps.push({ node: nodeToRecord, output, ...(subStepsToRecord && { subSteps: subStepsToRecord }) });
 
     FlowHub._emitEvent('flowManagerStep', {
       flowInstanceId: flowInstanceId,
       stepIndex: currentIndex - 1, // 0-based index of the node just processed (currentIndex was already incremented for the next step)
-      stepData: JSON.parse(JSON.stringify(steps.at(-1))), 
-      currentState: fmState.getState() 
+      stepData: JSON.parse(JSON.stringify(steps.at(-1))),
+      currentState: fmState.getState()
     });
   }
 
@@ -609,20 +645,26 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
       currentNode = nodes[currentIndex];
       const nodeToEvaluate = nodes[currentIndex]; // The actual node definition from the workflow `nodes` array.
 
-      // 1. Set `baseExecutionContext.input` from the output of the previous step in *this* FlowManager instance.
-      const previousStep = steps.at(-1);
-      if (previousStep && previousStep.output && Array.isArray(previousStep.output.results)) {
-        if (previousStep.output.results.length === 1) {
-          baseExecutionContext.input = previousStep.output.results[0];
-        } else if (previousStep.output.results.length > 0) {
-          baseExecutionContext.input = previousStep.output.results; // Pass array if multiple results
-        } else { 
-          baseExecutionContext.input = null; // Empty results array
-        }
+      // 1. Set `baseExecutionContext.input` from the output of the previous step in *this* FlowManager instance
+      //    OR from _initialInput if this is the first step.
+      if (currentIndex === 0 && _initialInput !== null) { // <<< MODIFIED: Check _initialInput for the very first node
+          baseExecutionContext.input = _initialInput;
       } else {
-        // No previous step, or previous step had no `results` array (e.g. only edges).
-        baseExecutionContext.input = null;
+          const previousStep = steps.at(-1);
+          if (previousStep && previousStep.output && Array.isArray(previousStep.output.results)) {
+              if (previousStep.output.results.length === 1) {
+                  baseExecutionContext.input = previousStep.output.results[0];
+              } else if (previousStep.output.results.length > 0) {
+                  baseExecutionContext.input = previousStep.output.results; // Pass array if multiple results
+              } else {
+                  baseExecutionContext.input = null; // Empty results array
+              }
+          } else {
+              // No previous step, or previous step had no `results` array (e.g. only edges).
+              baseExecutionContext.input = null;
+          }
       }
+
 
       // 2. Set `baseExecutionContext.self` with the definition/structure of the current node.
       let nodeDefinitionForSelfContext;
@@ -631,29 +673,40 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
         if (!nodeDefinitionForSelfContext) {
           // If string identifier isn't a known NodeDefinition or scoped function,
           // `self` becomes a minimal object representing this unresolved identifier.
-          nodeDefinitionForSelfContext = { 
-            id: nodeToEvaluate, 
-            name: nodeToEvaluate, 
+          nodeDefinitionForSelfContext = {
+            id: nodeToEvaluate,
+            name: nodeToEvaluate,
             description: "An identifier for a node or function that could not be fully resolved from scope for the 'self' context.",
             source:scope[nodeToEvaluate] ? scope[nodeToEvaluate].toString() : '',
-            _unresolvedIdentifier: true 
-          } 
-        } else {
-             nodeDefinitionForSelfContext = {   
-                     id: nodeToEvaluate, 
-                      name: nodeToEvaluate, 
-                      description: "An identifier for a node or function that could not be fully resolved from scope for the 'self' context.",
-                      source:scope[nodeToEvaluate] ? scope[nodeToEvaluate].toString() : ''
-                    }
+            _unresolvedIdentifier: true
+          }
+        } else if (scope[nodeToEvaluate] && typeof scope[nodeToEvaluate] === 'function' && !nodeDefinitionForSelfContext._isScopeProvidedFunction) {
+             // This case handles if findNodeDefinitionInScope returns a full NodeDef, but the original string
+             // was actually a direct function key in scope (e.g. "myDirectScopeFunc" instead of "myDirectScopeFunc:My Custom Function")
+             // We still want `self` to reflect the direct function call in this case if findNodeDefinitionInScope didn't already mark it.
+             nodeDefinitionForSelfContext = { // Overwrite/refine if necessary
+                id: nodeToEvaluate,
+                name: nodeToEvaluate,
+                description: 'A custom function provided directly in the FlowManager scope.',
+                source: scope[nodeToEvaluate].toString(),
+                _isScopeProvidedFunction: true
+            };
+        } else if (nodeDefinitionForSelfContext && nodeDefinitionForSelfContext.implementation) {
+            // Ensure source is correctly captured for resolved NodeDefinitions too.
+            nodeDefinitionForSelfContext = {
+                ...nodeDefinitionForSelfContext,
+                source: nodeDefinitionForSelfContext.implementation.toString()
+            };
         }
+
       } else if (typeof nodeToEvaluate === 'function') {
         // For a direct function in the nodes array, `self` is a synthetic definition.
         nodeDefinitionForSelfContext = {
-          id: `workflow-function-${currentIndex}`, 
+          id: `workflow-function-${currentIndex}`,
           name: `Workflow-Defined Function @ index ${currentIndex}`,
           description: 'A function provided directly within the workflow nodes definition.',
           source: nodeToEvaluate.toString(), // Store the function source code for reference
-          _isWorkflowProvidedFunction: true 
+          _isWorkflowProvidedFunction: true
         };
       } else if (typeof nodeToEvaluate === 'object' && nodeToEvaluate !== null && !Array.isArray(nodeToEvaluate)) {
         // OBJECT CASE: Could be a parameterized call, a branch structure, or an empty object.
@@ -662,7 +715,7 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
         if (keys.length === 1) {
           const nodeIdentifier = keys[0];
           const nodeParams = nodeToEvaluate[nodeIdentifier];
-          
+
           // Attempt to resolve the key as a function to see if it's a callable node.
           const implementation = resolveNodeFromScope(nodeIdentifier);
 
@@ -723,20 +776,20 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
       }
 
       baseExecutionContext.self = nodeDefinitionForSelfContext;
-      
+
       // Increment `currentIndex` *before* calling `evaluateNode` for the current node.
       // This means `currentIndex` in the lexical scope (used by emit/on) will point to the *next* node's slot,
       // so `currentIndex - 1` correctly refers to the 0-based index of the node currently being evaluated.
-      currentIndex++; 
-      
+      currentIndex++;
+
       await evaluateNode(nodeToEvaluate); // Pass the original node definition from the `nodes` array
-      
+
       await _nextStepInternal(); // Recurse for the next step
     } else {
       // All nodes in this FlowManager instance processed
       if (_resolveRunPromise) {
-        _resolveRunPromise(JSON.parse(JSON.stringify(steps))); 
-        _resolveRunPromise = null; _rejectRunPromise = null; 
+        _resolveRunPromise(JSON.parse(JSON.stringify(steps)));
+        _resolveRunPromise = null; _rejectRunPromise = null;
       }
     }
   }
@@ -748,13 +801,13 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
      * @returns {Promise<Array>} A promise that resolves with an array of all executed steps.
      */
     async run() {
-      currentIndex = 0; 
-      steps.length = 0;   
+      currentIndex = 0;
+      steps.length = 0;
 
       _registeredHubListeners.forEach(listenerRegistration => {
           FlowHub.removeEventListener(listenerRegistration.hubEventName, listenerRegistration.effectiveHubCallback);
       });
-      _registeredHubListeners.length = 0; 
+      _registeredHubListeners.length = 0;
 
       return new Promise(async (resolve, reject) => {
         _resolveRunPromise = resolve;
@@ -762,18 +815,18 @@ export function FlowManager({initialState, nodes, instanceId, scope: providedSco
 
         if (!nodes || nodes.length === 0) {
           console.log(`[FlowManager:${flowInstanceId}] No nodes to execute.`);
-          resolve([]); 
+          resolve([]);
           _resolveRunPromise = null; _rejectRunPromise = null;
           return;
         }
 
         try {
           console.log(`[FlowManager:${flowInstanceId}] Starting execution. Total nodes: ${nodes.length}. Scope keys: ${Object.keys(scope).length}`);
-          await _nextStepInternal(); 
+          await _nextStepInternal();
           console.log(`[FlowManager:${flowInstanceId}] Execution finished. Total steps executed: ${steps.length}.`);
         } catch (error) {
           console.error(`[FlowManager:${flowInstanceId}] Error during flow execution:`, error);
-          if(_rejectRunPromise) _rejectRunPromise(error); 
+          if(_rejectRunPromise) _rejectRunPromise(error);
           _resolveRunPromise = null; _rejectRunPromise = null;
         }
       });
