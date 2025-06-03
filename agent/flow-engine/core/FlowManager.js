@@ -90,7 +90,7 @@ export function FlowManager({
       },
       set(path, value) {
         let targetObjectForReturn; // What the 'set' operation effectively targeted
-
+    
         if (path === null || path === '') {
             // The intention is to replace the entire state.
             // _currentState should become a deep copy of 'value'.
@@ -105,7 +105,7 @@ export function FlowManager({
             // Setting a specific path
             const keys = path.split('.');
             let current = _currentState; // Work directly on _currentState for path setting
-
+    
             for (let i = 0; i < keys.length - 1; i++) {
                 const key = keys[i];
                 if (!current[key] || typeof current[key] !== 'object') {
@@ -117,14 +117,14 @@ export function FlowManager({
             current[lastKey] = JSON.parse(JSON.stringify(value)); // Ensure deep copy of value being set
             targetObjectForReturn = current[lastKey];
         }
-
-        // Add a new history entry: a deep copy of the modified _currentState
-        _history.splice(_historyCurrentIndex + 1);
-        _history.push(JSON.parse(JSON.stringify(_currentState)));
-        _historyCurrentIndex = _history.length - 1;
-
+    
+        // FIXED: Remove any future history entries and add the new state
+        _history.splice(_historyCurrentIndex + 1); // Remove future entries
+        _history.push(JSON.parse(JSON.stringify(_currentState))); // Add current modified state
+        _historyCurrentIndex = _history.length - 1; // Update index to point to the new entry
+    
         return JSON.parse(JSON.stringify(targetObjectForReturn)); // Return a deep copy of what was set
-      },
+    },
 
       getState() { return JSON.parse(JSON.stringify(_currentState)); },
       canUndo() { return _historyCurrentIndex > 0; },
@@ -132,23 +132,32 @@ export function FlowManager({
       undo() {
         if (this.canUndo()) {
           _historyCurrentIndex--;
+          // Clear current state
+          Object.keys(_currentState).forEach(key => delete _currentState[key]);
+          // Assign the historical state
           Object.assign(_currentState, JSON.parse(JSON.stringify(_history[_historyCurrentIndex])));
-        }
-        return this.getState();
+      }
+      return this.getState();
       },
       redo() {
         if (this.canRedo()) {
           _historyCurrentIndex++;
+          // Clear current state
+          Object.keys(_currentState).forEach(key => delete _currentState[key]);
+          // Assign the historical state
           Object.assign(_currentState, JSON.parse(JSON.stringify(_history[_historyCurrentIndex])));
-        }
-        return this.getState();
+      }
+      return this.getState();
       },
       goToState(index) {
         if (index >= 0 && index < _history.length) {
           _historyCurrentIndex = index;
+          // Clear current state
+          Object.keys(_currentState).forEach(key => delete _currentState[key]);
+          // Assign the historical state
           Object.assign(_currentState, JSON.parse(JSON.stringify(_history[_historyCurrentIndex])));
-        }
-        return this.getState();
+      }
+      return this.getState();
       },
       getHistory() { return _history.map(s => JSON.parse(JSON.stringify(s))); },
       getCurrentIndex() { return _historyCurrentIndex; }
@@ -219,56 +228,70 @@ export function FlowManager({
        *                              with 'self' and 'input' captured at the time of listener registration.
        */
       on: function(customEventName, nodeCallback) {
-          if (typeof nodeCallback !== 'function') {
-              console.error(`[FlowManager:${this.flowInstanceId}] Node 'on' listener: callback must be a function for event '${customEventName}'.`);
-              return;
-          }
-
-          // Capture critical parts of the context AT THE TIME OF LISTENER REGISTRATION
-          const capturedSelf = JSON.parse(JSON.stringify(this.self));
-          const capturedInput = (typeof this.input === 'object' && this.input !== null)
-                                ? JSON.parse(JSON.stringify(this.input))
-                                : this.input;
-          const originalFlowManagerContext = this; // For calling .state, .emit, .humanInput etc.
-
-          const listeningNodeMeta = {
-              index: currentIndex - 1,
-              definition: capturedSelf, // Use the captured definition for meta consistency
-              flowInstanceId: this.flowInstanceId
-          };
-
-          const effectiveHubCallback = (flowHubEventData) => {
-              if (flowHubEventData.customEventName === customEventName) {
-                  const meta = {
-                      eventName: flowHubEventData.customEventName,
-                      emittingNodeMeta: {
-                          index: flowHubEventData.emittingNode.index,
-                          definition: flowHubEventData.emittingNode.definition,
-                          flowInstanceId: flowHubEventData.flowInstanceId
-                      },
-                      listeningNodeMeta: listeningNodeMeta
-                  };
-
-                  // Construct a 'this' for the callback that uses captured self/input,
-                  // but delegates other properties/methods to the original context.
-                  const callbackThisContext = Object.create(originalFlowManagerContext);
-                  callbackThisContext.self = capturedSelf;
-                  callbackThisContext.input = capturedInput;
-
-                  try {
-                      nodeCallback.call(callbackThisContext, flowHubEventData.eventData, meta);
-                  } catch (e) {
-                      console.error(`[FlowManager:${this.flowInstanceId}] Error in node event listener callback for '${customEventName}' (listener idx: ${listeningNodeMeta.index} in FM: ${listeningNodeMeta.flowInstanceId}):`, e);
-                  }
-              }
-          };
-
-          FlowHub.addEventListener('flowManagerNodeEvent', effectiveHubCallback);
-          _registeredHubListeners.push({
-              hubEventName: 'flowManagerNodeEvent',
-              effectiveHubCallback: effectiveHubCallback
-          });
-      }
+        if (typeof nodeCallback !== 'function') {
+            console.error(`[FlowManager:${this.flowInstanceId}] Node 'on' listener: callback must be a function for event '${customEventName}'.`);
+            return;
+        }
+    
+        // Capture critical parts of the context AT THE TIME OF LISTENER REGISTRATION
+        const capturedSelf = JSON.parse(JSON.stringify(this.self));
+        const capturedInput = (typeof this.input === 'object' && this.input !== null)
+                              ? JSON.parse(JSON.stringify(this.input))
+                              : this.input;
+        const flowInstanceId = this.flowInstanceId;
+        const state = this.state;
+        const emit = this.emit.bind(this);
+        const humanInput = this.humanInput.bind(this);
+        const steps = this.steps;
+        const nodes = this.nodes;
+    
+        const listeningNodeMeta = {
+            index: currentIndex - 1,
+            definition: capturedSelf,
+            flowInstanceId: flowInstanceId
+        };
+    
+        const effectiveHubCallback = (flowHubEventData) => {
+            if (flowHubEventData.customEventName === customEventName) {
+                const meta = {
+                    eventName: flowHubEventData.customEventName,
+                    emittingNodeMeta: {
+                        index: flowHubEventData.emittingNode.index,
+                        definition: flowHubEventData.emittingNode.definition,
+                        flowInstanceId: flowHubEventData.flowInstanceId
+                    },
+                    listeningNodeMeta: listeningNodeMeta
+                };
+    
+                // Create a fresh context object with captured values
+                const callbackThisContext = {
+                    self: capturedSelf,
+                    input: capturedInput,
+                    flowInstanceId: flowInstanceId,
+                    state: state,
+                    emit: emit,
+                    humanInput: humanInput,
+                    steps: steps,
+                    nodes: nodes,
+                    on: function() {
+                        console.warn(`[FlowManager:${flowInstanceId}] Cannot register new listeners from within an event callback`);
+                    }
+                };
+    
+                try {
+                    nodeCallback.call(callbackThisContext, flowHubEventData.eventData, meta);
+                } catch (e) {
+                    console.error(`[FlowManager:${flowInstanceId}] Error in node event listener callback for '${customEventName}' (listener idx: ${listeningNodeMeta.index} in FM: ${listeningNodeMeta.flowInstanceId}):`, e);
+                }
+            }
+        };
+    
+        FlowHub.addEventListener('flowManagerNodeEvent', effectiveHubCallback);
+        _registeredHubListeners.push({
+            hubEventName: 'flowManagerNodeEvent',
+            effectiveHubCallback: effectiveHubCallback
+        });
+    }
   };
 
   /**
