@@ -92,7 +92,7 @@ const FlowHub = (function() {
                 }
                 _pausedFlows.set(pauseId, { resolve, details, flowInstanceId });
                 this._emitEvent('flowPaused', { pauseId, details, flowInstanceId });
-                console.log(`[FlowHub] Flow ${flowInstanceId} paused. ID: ${pauseId}. Details: ${JSON.stringify(details)}. Waiting for resume...`);
+              //  console.log(`[FlowHub] Flow ${flowInstanceId} paused. ID: ${pauseId}. Details: ${JSON.stringify(details)}. Waiting for resume...`);
             });
         },
 
@@ -108,7 +108,7 @@ const FlowHub = (function() {
                 resolve(resumeData);
                 _pausedFlows.delete(pauseId);
                 this._emitEvent('flowResumed', { pauseId, resumeData, details, flowInstanceId });
-                console.log(`[FlowHub] Flow ${flowInstanceId} resumed. ID: ${pauseId} with data:`, resumeData);
+             //   console.log(`[FlowHub] Flow ${flowInstanceId} resumed. ID: ${pauseId} with data:`, resumeData);
                 return true;
             } else {
                 console.warn(`[FlowHub] No active pause found for ID: ${pauseId}. Cannot resume.`);

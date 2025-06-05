@@ -10,10 +10,10 @@ import { NodeRegistry } from '../../../flow-engine/core/NodeRegistry';
 import { FlowManager } from '../../../flow-engine/core/FlowManager';
 
 onMounted(async () => {
-    console.log("\n--- Running Example Flow ---");
+
     const scope = NodeRegistry.getScope();
     scope['Test something'] = function() {
-        console.log("Test something called!",this.self);
+        console.log("Test something called!",this.nodes);
         return {
             "text": ()=> {
                 return "This is a test text for sentiment analysis.";
@@ -24,7 +24,7 @@ onMounted(async () => {
     const fm = FlowManager({
         initialState: { myText: "This is great!" },
         nodes: [
-            'Test something',
+          //  'Test something',
             {
                 "Sentiment Analyzer": {
                     "text": "Uraaaa!",
@@ -46,6 +46,6 @@ onMounted(async () => {
     } catch (e) {
         console.error("Flow execution error:", e);
     }
-    console.log("--- Example Flow End ---");
+
 });
 </script>

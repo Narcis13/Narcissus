@@ -186,13 +186,13 @@ export function FlowManager({
        * @returns {Promise<any>} A promise that resolves with the human-provided data.
        */
       humanInput: async function(details, customPauseId) {
-          console.log(`[FlowManager:${this.flowInstanceId}] Node (idx: ${currentIndex-1}, def: ${JSON.stringify(currentNode).substring(0,50)}...) requests human input. Details:`, details, "Pause ID hint:", customPauseId);
+         // console.log(`[FlowManager:${this.flowInstanceId}] Node (idx: ${currentIndex-1}, def: ${JSON.stringify(currentNode).substring(0,50)}...) requests human input. Details:`, details, "Pause ID hint:", customPauseId);
           const resumeData = await FlowHub.requestPause({
               pauseId: customPauseId,
               details,
               flowInstanceId: this.flowInstanceId
           });
-          console.log(`[FlowManager:${this.flowInstanceId}] Human input received for node (idx: ${currentIndex-1}):`, resumeData);
+         // console.log(`[FlowManager:${this.flowInstanceId}] Human input received for node (idx: ${currentIndex-1}):`, resumeData);
           return resumeData;
       },
       /**
@@ -837,16 +837,16 @@ export function FlowManager({
         _rejectRunPromise = reject;
 
         if (!nodes || nodes.length === 0) {
-          console.log(`[FlowManager:${flowInstanceId}] No nodes to execute.`);
+        //  console.log(`[FlowManager:${flowInstanceId}] No nodes to execute.`);
           resolve([]);
           _resolveRunPromise = null; _rejectRunPromise = null;
           return;
         }
 
         try {
-          console.log(`[FlowManager:${flowInstanceId}] Starting execution. Total nodes: ${nodes.length}. Scope keys: ${Object.keys(scope).length}`);
+         // console.log(`[FlowManager:${flowInstanceId}] Starting execution. Total nodes: ${nodes.length}. Scope keys: ${Object.keys(scope).length}`);
           await _nextStepInternal();
-          console.log(`[FlowManager:${flowInstanceId}] Execution finished. Total steps executed: ${steps.length}.`);
+       //   console.log(`[FlowManager:${flowInstanceId}] Execution finished. Total steps executed: ${steps.length}.`);
         } catch (error) {
           console.error(`[FlowManager:${flowInstanceId}] Error during flow execution:`, error);
           if(_rejectRunPromise) _rejectRunPromise(error);
